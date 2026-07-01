@@ -1,23 +1,25 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useCRMStore } from '@/src/store/crmStore';
 import { Mail, Github, Compass, Lock, ArrowRight } from 'lucide-react';
 
 export default function UnifiedLoginPage() {
   const router = useRouter();
+  const restoreSession = useCRMStore((s) => s.restoreSession);
   const [isLoginTab, setIsLoginTab] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  // Redireciona imediatamente se já houver uma sessão válida salva no carregamento inicial
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const activeSession = localStorage.getItem('crm_session_active');
       if (activeSession) {
-        window.location.href = '/app';
+        restoreSession(activeSession);
+        router.push('/app');
       }
     }
-  }, []);
+  }, [router, restoreSession]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,14 +53,9 @@ export default function UnifiedLoginPage() {
 
       // GRAVA SESSÃO NO STORAGE
       localStorage.setItem('crm_session_active', cleanEmail);
-      
-      // Engenharia de Contingência Sênior: Força a navegação nativa pelo objeto window
-      // caso o router.push sofra interceptação de ciclo de vida no ambiente simulado.
-      if (router) {
-        router.push('/app');
-      } else {
-        window.location.href = '/app';
-      }
+      restoreSession(cleanEmail);
+
+      router.push('/app');
     }
   };
 
@@ -75,7 +72,8 @@ export default function UnifiedLoginPage() {
 
     localStorage.setItem(`user_${cleanEmail}`, 'sso_verified_token');
     localStorage.setItem('crm_session_active', cleanEmail);
-    window.location.href = '/app';
+    restoreSession(cleanEmail);
+    router.push('/app');
   };
 
   return (

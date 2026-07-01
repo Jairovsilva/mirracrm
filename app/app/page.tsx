@@ -17,24 +17,28 @@ import { AlertsPanel } from '@/src/components/alerts/AlertsPanel';
 export type ViewType = 'dashboard' | 'kanban' | 'leads' | 'analytics' | 'team' | 'settings';
 
 export default function AppPage() {
-  const currentUser = useCRMStore((s) => s.currentUser);
+  const restoreSession = useCRMStore((s) => s.restoreSession);
   const [activeView, setActiveView] = useState<ViewType>('dashboard');
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showAlerts, setShowAlerts] = useState(false);
   const [leadFormOpen, setLeadFormOpen] = useState(false);
   const [leadFormId, setLeadFormId] = useState<string | null>(null);
   const [detailLeadId, setDetailLeadId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [isAuthorized, setIsAuthorized] = useState(false);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      if (!currentUser) {
-        window.location.href = '/';
-        return;
-      }
-      setIsAuthorized(true);
+    if (typeof window === 'undefined') return;
+
+    const session = localStorage.getItem('crm_session_active');
+    if (!session) {
+      window.location.href = '/';
+      return;
     }
-  }, [currentUser]);
+
+    restoreSession(session);
+    setIsAuthorized(true);
+    setIsLoading(false);
+  }, [restoreSession]);
 
   const handleAddLead = () => {
     setLeadFormId(null);
@@ -54,11 +58,11 @@ export default function AppPage() {
     setActiveView('kanban');
   };
 
-  if (!isAuthorized) {
+  if (isLoading || !isAuthorized) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white">
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white font-sans">
         <div className="text-center space-y-3">
-          <p className="text-sm font-semibold text-slate-400">Verificando chaves de segurança corporativas...</p>
+          <p className="text-sm font-semibold text-slate-400">Autenticando chaves de segurança do workspace...</p>
           <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
         </div>
       </div>

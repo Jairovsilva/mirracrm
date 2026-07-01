@@ -55,6 +55,7 @@ interface CRMState {
   toggleTheme: () => void;
   login: (email: string, password: string) => boolean;
   register: (email: string, password: string) => boolean;
+  restoreSession: (email: string) => void;
   addLead: (lead: Omit<Lead, 'id' | 'activities' | 'userId'>) => void;
   updateLeadStage: (id: string, stage: Stage) => void;
   updateLead: (id: string, updatedFields: Partial<Lead>) => void;
@@ -128,6 +129,28 @@ export const useCRMStore = create<CRMState>((set, get) => ({
 
     set({ currentUser: user });
     return true;
+  },
+
+  restoreSession: (email) => {
+    const { registeredUsers, currentUser } = get();
+    if (currentUser) return;
+
+    const user = registeredUsers.find(u => u.email.toLowerCase() === email.toLowerCase());
+    if (user) {
+      set({ currentUser: user });
+      return;
+    }
+
+    const domain = email.split('@')[1] || 'empresa';
+    const empresa = domain.split('.')[0].toUpperCase();
+    const newUser: User = {
+      id: 'restored_' + Date.now(),
+      email,
+      empresa,
+      role: 'admin_principal',
+      passwordHash: 'sso_verified_token',
+    };
+    set({ registeredUsers: [...registeredUsers, newUser], currentUser: newUser });
   },
 
   addLead: (leadData) => set((state) => ({
