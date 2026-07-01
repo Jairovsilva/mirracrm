@@ -1,123 +1,84 @@
 'use client';
+import React, { useState, useEffect } from 'react';
+import Sidebar from '../../src/components/layout/Sidebar';
+import Header from '../../src/components/layout/Header';
+import KanbanBoard from '../../src/components/KanbanBoard';
+import Dashboard from '../../src/components/Dashboard';
 
-import { useEffect, useState } from 'react';
-import { useCRMStore } from '@/src/store/crmStore';
-import { Sidebar } from '@/src/components/layout/Sidebar';
-import { Header } from '@/src/components/layout/Header';
-import { DashboardView } from '@/src/components/views/DashboardView';
-import { KanbanView } from '@/src/components/views/KanbanView';
-import { LeadsView } from '@/src/components/views/LeadsView';
-import { AnalyticsView } from '@/src/components/views/AnalyticsView';
-import { TeamView } from '@/src/components/views/TeamView';
-import { SettingsView } from '@/src/components/views/SettingsView';
-import { LeadDetailDrawer } from '@/src/components/leads/LeadDetailDrawer';
-import { LeadFormModal } from '@/src/components/leads/LeadFormModal';
-import { AlertsPanel } from '@/src/components/alerts/AlertsPanel';
-
-export type ViewType = 'dashboard' | 'kanban' | 'leads' | 'analytics' | 'team' | 'settings';
-
-export default function AppPage() {
-  const currentUser = useCRMStore((s) => s.currentUser);
-  const theme = useCRMStore((s) => s.theme);
-  const [activeView, setActiveView] = useState<ViewType>('dashboard');
-  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
-  const [showLeadForm, setShowLeadForm] = useState(false);
-  const [editingLeadId, setEditingLeadId] = useState<string | null>(null);
-  const [showAlerts, setShowAlerts] = useState(false);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+export default function CRMAppShell() {
+  const [activeTab, setActiveTab] = useState('pipeline');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      if (theme === 'dark') {
-        document.documentElement.classList.add('dark');
-        localStorage.setItem('corca-theme', 'dark');
+      const session = localStorage.getItem('crm_session_active');
+      if (!session) {
+        // Se a sessão sumir por recarregamento agressivo do sandbox ou logout, força retorno
+        window.location.href = '/';
       } else {
-        document.documentElement.classList.remove('dark');
-        localStorage.setItem('corca-theme', 'light');
+        setIsAuthorized(true);
       }
     }
-  }, [theme]);
+  }, []);
 
-  useEffect(() => {
-    if (mounted && !currentUser) {
-      window.location.href = '/';
-    }
-  }, [mounted, currentUser]);
-
-  if (!mounted) {
+  // Enquanto o estado de autorização do cliente confere o localStorage, exibe um esqueleto de segurança
+  if (!isAuthorized) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-pulse text-muted-foreground">Carregando...</div>
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white">
+        <div className="text-center space-y-3">
+          <p className="text-sm font-semibold text-slate-400">Verificando chaves de segurança corporativas...</p>
+          <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+        </div>
       </div>
     );
   }
 
-  if (!currentUser) {
-    return null;
-  }
-
-  const handleOpenLead = (id: string) => setSelectedLeadId(id);
-  const handleCloseLead = () => setSelectedLeadId(null);
-  const handleAddLead = () => {
-    setEditingLeadId(null);
-    setShowLeadForm(true);
-  };
-  const handleEditLead = (id: string) => {
-    setEditingLeadId(id);
-    setShowLeadForm(true);
-  };
-
   return (
-    <div className="min-h-screen bg-background flex">
-      <Sidebar activeView={activeView} onViewChange={setActiveView} />
-      <div className="flex-1 flex flex-col min-w-0">
-        <Header
-          onAddLead={handleAddLead}
-          onToggleAlerts={() => setShowAlerts(!showAlerts)}
-          showAlerts={showAlerts}
-        />
-        <main className="flex-1 overflow-auto scrollbar-thin">
-          {activeView === 'dashboard' && (
-            <DashboardView onOpenLead={handleOpenLead} onAddLead={handleAddLead} onViewKanban={() => setActiveView('kanban')} />
+    <div className="flex h-screen bg-slate-950 text-white overflow-hidden font-sans">
+      <Sidebar 
+        activeTab={activeTab} 
+        setActiveTab={setActiveTab} 
+        isOpen={sidebarOpen} 
+        setIsOpen={setSidebarOpen} 
+      />
+
+      <div className="flex flex-col flex-1 w-full overflow-y-auto">
+        <Header setSidebarOpen={setSidebarOpen} />
+
+        <main className="flex-1 p-4 md:p-6 max-w-7xl w-full mx-auto pb-24">
+          {activeTab === 'pipeline' && <KanbanBoard />}
+          {activeTab === 'dashboard' && <Dashboard />}
+          
+          {activeTab === 'contacts' && (
+            <div className="p-6 bg-slate-900 border border-slate-800 rounded-xl">
+              <h2 className="text-xl font-bold mb-2">Módulo Contatos Rápidos</h2>
+              <p className="text-xs text-slate-400">Barra de busca reativa e listagem de contatos corporativos mapeados.</p>
+            </div>
           )}
-          {activeView === 'kanban' && (
-            <KanbanView onOpenLead={handleOpenLead} onAddLead={handleAddLead} onEditLead={handleEditLead} />
+          
+          {activeTab === 'alerts' && (
+            <div className="p-6 bg-slate-900 border border-slate-800 rounded-xl">
+              <h2 className="text-xl font-bold mb-2">Alertas & Notificações Ativas</h2>
+              <p className="text-xs text-slate-400">Lembretes gerados por automação e análises preditivas dos leads.</p>
+            </div>
           )}
-          {activeView === 'leads' && (
-            <LeadsView onOpenLead={handleOpenLead} onAddLead={handleAddLead} onEditLead={handleEditLead} />
+          
+          {activeTab === 'reports' && (
+            <div className="p-6 bg-slate-900 border border-slate-800 rounded-xl">
+              <h2 className="text-xl font-bold mb-2">Relatórios Analíticos</h2>
+              <p className="text-xs text-slate-400">Acompanhamento e exportação de taxas de conversão históricas da equipe.</p>
+            </div>
           )}
-          {activeView === 'analytics' && <AnalyticsView />}
-          {activeView === 'team' && <TeamView />}
-          {activeView === 'settings' && <SettingsView />}
+
+          {activeTab === 'settings' && (
+            <div className="p-6 bg-slate-900 border border-slate-800 rounded-xl">
+              <h2 className="text-xl font-bold mb-2">Configurações do Workspace</h2>
+              <p className="text-xs text-slate-400">Ajustes de permissões do time, regras comerciais e integrações de API.</p>
+            </div>
+          )}
         </main>
       </div>
-
-      {selectedLeadId && (
-        <LeadDetailDrawer
-          leadId={selectedLeadId}
-          onClose={handleCloseLead}
-          onEdit={() => {
-            handleEditLead(selectedLeadId);
-            handleCloseLead();
-          }}
-        />
-      )}
-
-      {showLeadForm && (
-        <LeadFormModal
-          leadId={editingLeadId}
-          onClose={() => {
-            setShowLeadForm(false);
-            setEditingLeadId(null);
-          }}
-        />
-      )}
-
-      {showAlerts && <AlertsPanel onClose={() => setShowAlerts(false)} />}
     </div>
   );
 }
