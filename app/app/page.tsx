@@ -13,6 +13,7 @@ export default function CRMAppShell() {
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthorized, setIsAuthorized] = useState(false);
   
+  // Captura o estado de tema do store original do projeto (Zustand)
   const { theme } = useCRMStore();
 
   useEffect(() => {
@@ -26,6 +27,7 @@ export default function CRMAppShell() {
         setIsLoading(false);
       }
 
+      // Escuta o clique do botão de "Sair/Logout" vindo do componente Sidebar
       const handleLogoutEvent = () => {
         localStorage.removeItem('crm_session_active');
         window.location.href = '/';
@@ -36,6 +38,7 @@ export default function CRMAppShell() {
     }
   }, []);
 
+  // Cria uma ponte nativa no objeto window para o botão de logout original funcionar
   if (typeof window !== 'undefined' && !window.logout) {
     window.logout = () => {
       localStorage.removeItem('crm_session_active');
@@ -102,7 +105,7 @@ export default function CRMAppShell() {
         </main>
       </div>
 
-      {/* Agente de IA flutuante renderizado globalmente sobre o painel */}
+      {/* Agente de IA flutuante renderizado de forma global */}
       <AIAssistant />
     </div>
   );
