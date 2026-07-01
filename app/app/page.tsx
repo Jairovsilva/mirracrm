@@ -1,9 +1,9 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import Sidebar from '@/components/layout/Sidebar';
-import Header from '@/components/layout/Header';
-import KanbanBoard from '@/components/KanbanBoard';
-import Dashboard from '@/components/Dashboard';
+import Sidebar from '@/src/components/layout/Sidebar';
+import Header from '@/src/components/layout/Header';
+import KanbanBoard from '@/src/components/KanbanBoard';
+import Dashboard from '@/src/components/Dashboard';
 
 export default function CRMAppShell() {
   const [activeTab, setActiveTab] = useState('pipeline');
