@@ -26,7 +26,12 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
   ];
 
   const handleLogout = () => {
-    window.location.href = '/';
+    if (typeof window !== 'undefined' && typeof window.logout === 'function') {
+      window.logout();
+    } else {
+      localStorage.removeItem('crm_session_active');
+      window.location.href = '/';
+    }
   };
 
   return (

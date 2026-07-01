@@ -18,6 +18,7 @@ export type ViewType = 'dashboard' | 'kanban' | 'leads' | 'analytics' | 'team' |
 
 export default function AppPage() {
   const restoreSession = useCRMStore((s) => s.restoreSession);
+  const theme = useCRMStore((s) => s.theme);
   const [activeView, setActiveView] = useState<ViewType>('dashboard');
   const [showAlerts, setShowAlerts] = useState(false);
   const [leadFormOpen, setLeadFormOpen] = useState(false);
@@ -40,6 +41,31 @@ export default function AppPage() {
     setIsLoading(false);
   }, [restoreSession]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const root = document.documentElement;
+    if (theme === 'dark') {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+  }, [theme]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleLogout = () => {
+      localStorage.removeItem('crm_session_active');
+      window.location.href = '/';
+    };
+
+    window.logout = handleLogout;
+
+    const handleLogoutEvent = () => handleLogout();
+    window.addEventListener('crm_logout_trigger', handleLogoutEvent);
+    return () => window.removeEventListener('crm_logout_trigger', handleLogoutEvent);
+  }, []);
+
   const handleAddLead = () => {
     setLeadFormId(null);
     setLeadFormOpen(true);
@@ -60,10 +86,10 @@ export default function AppPage() {
 
   if (isLoading || !isAuthorized) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white font-sans">
+      <div className="min-h-screen bg-background flex items-center justify-center text-foreground font-sans">
         <div className="text-center space-y-3">
-          <p className="text-sm font-semibold text-slate-400">Autenticando chaves de segurança do workspace...</p>
-          <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <p className="text-sm font-semibold text-muted-foreground">Autenticando chaves de segurança do workspace...</p>
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto"></div>
         </div>
       </div>
     );
