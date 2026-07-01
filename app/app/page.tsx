@@ -1,9 +1,9 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import Sidebar from '../../src/components/layout/Sidebar';
-import Header from '../../src/components/layout/Header';
-import KanbanBoard from '../../src/components/KanbanBoard';
-import Dashboard from '../../src/components/Dashboard';
+import Sidebar from '@/components/layout/Sidebar';
+import Header from '@/components/layout/Header';
+import KanbanBoard from '@/components/KanbanBoard';
+import Dashboard from '@/components/Dashboard';
 
 export default function CRMAppShell() {
   const [activeTab, setActiveTab] = useState('pipeline');
@@ -14,7 +14,6 @@ export default function CRMAppShell() {
     if (typeof window !== 'undefined') {
       const session = localStorage.getItem('crm_session_active');
       if (!session) {
-        // Se a sessão sumir por recarregamento agressivo do sandbox ou logout, força retorno
         window.location.href = '/';
       } else {
         setIsAuthorized(true);
@@ -22,7 +21,6 @@ export default function CRMAppShell() {
     }
   }, []);
 
-  // Enquanto o estado de autorização do cliente confere o localStorage, exibe um esqueleto de segurança
   if (!isAuthorized) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white">
