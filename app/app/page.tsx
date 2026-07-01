@@ -1,112 +1,155 @@
 'use client';
-import React, { useState, useEffect } from 'react';
-import Sidebar from '@/src/components/layout/Sidebar';
-import Header from '@/src/components/layout/Header';
-import KanbanBoard from '@/src/components/KanbanBoard';
-import Dashboard from '@/src/components/Dashboard';
-import AIAssistant from '@/src/components/AIAssistant'; // Ativação do Agente de IA do Gemini
-import { useCRMStore } from '@/src/store/crmStore';
 
-export default function CRMAppShell() {
-  const [activeTab, setActiveTab] = useState('pipeline');
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+import { useState, useEffect } from 'react';
+import { useCRMStore } from '@/src/store/crmStore';
+import { Sidebar } from '@/src/components/layout/Sidebar';
+import { Header } from '@/src/components/layout/Header';
+import { DashboardView } from '@/src/components/views/DashboardView';
+import { KanbanView } from '@/src/components/views/KanbanView';
+import { LeadsView } from '@/src/components/views/LeadsView';
+import { AnalyticsView } from '@/src/components/views/AnalyticsView';
+import { TeamView } from '@/src/components/views/TeamView';
+import { SettingsView } from '@/src/components/views/SettingsView';
+import { LeadDetailDrawer } from '@/src/components/leads/LeadDetailDrawer';
+import { LeadFormModal } from '@/src/components/leads/LeadFormModal';
+import { AlertsPanel } from '@/src/components/alerts/AlertsPanel';
+
+export type ViewType = 'dashboard' | 'kanban' | 'leads' | 'analytics' | 'team' | 'settings';
+
+export default function AppPage() {
+  const restoreSession = useCRMStore((s) => s.restoreSession);
+  const theme = useCRMStore((s) => s.theme);
+  const [activeView, setActiveView] = useState<ViewType>('dashboard');
+  const [showAlerts, setShowAlerts] = useState(false);
+  const [leadFormOpen, setLeadFormOpen] = useState(false);
+  const [leadFormId, setLeadFormId] = useState<string | null>(null);
+  const [detailLeadId, setDetailLeadId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthorized, setIsAuthorized] = useState(false);
-  
-  // Captura o estado de tema do store original do projeto (Zustand)
-  const { theme } = useCRMStore();
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const session = localStorage.getItem('crm_session_active');
-      
-      if (!session) {
-        window.location.href = '/';
-      } else {
-        setIsAuthorized(true);
-        setIsLoading(false);
-      }
+    if (typeof window === 'undefined') return;
 
-      // Escuta o clique do botão de "Sair/Logout" vindo do componente Sidebar
-      const handleLogoutEvent = () => {
-        localStorage.removeItem('crm_session_active');
-        window.location.href = '/';
-      };
-
-      window.addEventListener('crm_logout_trigger', handleLogoutEvent);
-      return () => window.removeEventListener('crm_logout_trigger', handleLogoutEvent);
+    const session = localStorage.getItem('crm_session_active');
+    if (!session) {
+      window.location.href = '/';
+      return;
     }
-  }, []);
 
-  // Cria uma ponte nativa no objeto window para o botão de logout original funcionar
-  if (typeof window !== 'undefined' && !window.logout) {
-    window.logout = () => {
+    restoreSession(session);
+    setIsAuthorized(true);
+    setIsLoading(false);
+  }, [restoreSession]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const root = document.documentElement;
+    if (theme === 'dark') {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+  }, [theme]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleLogout = () => {
       localStorage.removeItem('crm_session_active');
       window.location.href = '/';
     };
-  }
+
+    window.logout = handleLogout;
+
+    const handleLogoutEvent = () => handleLogout();
+    window.addEventListener('crm_logout_trigger', handleLogoutEvent);
+    return () => window.removeEventListener('crm_logout_trigger', handleLogoutEvent);
+  }, []);
+
+  const handleAddLead = () => {
+    setLeadFormId(null);
+    setLeadFormOpen(true);
+  };
+
+  const handleEditLead = (id: string) => {
+    setLeadFormId(id);
+    setLeadFormOpen(true);
+  };
+
+  const handleOpenLead = (id: string) => {
+    setDetailLeadId(id);
+  };
+
+  const handleViewKanban = () => {
+    setActiveView('kanban');
+  };
 
   if (isLoading || !isAuthorized) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white font-sans">
+      <div className="min-h-screen bg-background flex items-center justify-center text-foreground font-sans">
         <div className="text-center space-y-3">
-          <p className="text-sm font-semibold text-slate-400">Autenticando chaves de segurança do workspace...</p>
-          <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <p className="text-sm font-semibold text-muted-foreground">Autenticando chaves de segurança do workspace...</p>
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto"></div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className={`flex h-screen overflow-hidden font-sans transition-colors duration-200 ${
-      theme === 'dark' ? 'bg-slate-950 text-white' : 'bg-slate-50 text-slate-900'
-    }`}>
-      <Sidebar 
-        activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
-        isOpen={sidebarOpen} 
-        setIsOpen={setSidebarOpen} 
-      />
+    <div className="flex h-screen bg-background text-foreground overflow-hidden">
+      <Sidebar activeView={activeView} onViewChange={setActiveView} />
 
-      <div className="flex flex-col flex-1 w-full overflow-y-auto">
-        <Header setSidebarOpen={setSidebarOpen} />
+      <div className="flex flex-col flex-1 w-full overflow-hidden">
+        <Header
+          onAddLead={handleAddLead}
+          onToggleAlerts={() => setShowAlerts(!showAlerts)}
+          showAlerts={showAlerts}
+        />
 
-        <main className="flex-1 p-4 md:p-6 max-w-7xl w-full mx-auto pb-24">
-          {activeTab === 'pipeline' && <KanbanBoard />}
-          {activeTab === 'dashboard' && <Dashboard />}
-          
-          {activeTab === 'contacts' && (
-            <div className={`p-6 border rounded-xl ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'}`}>
-              <h2 className="text-xl font-bold mb-2">Módulo Contatos Rápidos</h2>
-              <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>Barra de busca reativa e listagem de contatos corporativos mapeados.</p>
-            </div>
+        <main className="flex-1 overflow-y-auto">
+          {activeView === 'dashboard' && (
+            <DashboardView
+              onOpenLead={handleOpenLead}
+              onAddLead={handleAddLead}
+              onViewKanban={handleViewKanban}
+            />
           )}
-          
-          {activeTab === 'alerts' && (
-            <div className={`p-6 border rounded-xl ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'}`}>
-              <h2 className="text-xl font-bold mb-2">Alertas & Notificações Ativas</h2>
-              <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>Lembretes gerados por automação e análises preditivas dos leads.</p>
-            </div>
+          {activeView === 'kanban' && (
+            <KanbanView
+              onOpenLead={handleOpenLead}
+              onAddLead={handleAddLead}
+              onEditLead={handleEditLead}
+            />
           )}
-          
-          {activeTab === 'reports' && (
-            <div className={`p-6 border rounded-xl ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'}`}>
-              <h2 className="text-xl font-bold mb-2">Relatórios Analíticos</h2>
-              <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>Acompanhamento e exportação de taxas de conversão históricas da equipe.</p>
-            </div>
+          {activeView === 'leads' && (
+            <LeadsView
+              onOpenLead={handleOpenLead}
+              onAddLead={handleAddLead}
+              onEditLead={handleEditLead}
+            />
           )}
-
-          {activeTab === 'settings' && (
-            <div className={`p-6 border rounded-xl ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'}`}>
-              <h2 className="text-xl font-bold mb-2">Configurações do Workspace</h2>
-              <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>Ajustes de permissões do time, regras comerciais e integrações de API.</p>
-            </div>
-          )}
+          {activeView === 'analytics' && <AnalyticsView />}
+          {activeView === 'team' && <TeamView />}
+          {activeView === 'settings' && <SettingsView />}
         </main>
       </div>
 
-      {/* Agente de IA flutuante renderizado de forma global */}
-      <AIAssistant />
+      {showAlerts && <AlertsPanel onClose={() => setShowAlerts(false)} />}
+
+      {leadFormOpen && (
+        <LeadFormModal leadId={leadFormId} onClose={() => setLeadFormOpen(false)} />
+      )}
+
+      {detailLeadId && (
+        <LeadDetailDrawer
+          leadId={detailLeadId}
+          onClose={() => setDetailLeadId(null)}
+          onEdit={() => {
+            handleEditLead(detailLeadId);
+            setDetailLeadId(null);
+          }}
+        />
+      )}
     </div>
   );
 }
