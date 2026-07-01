@@ -1,5 +1,5 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Mail, Github, Compass, Lock, ArrowRight } from 'lucide-react';
 
@@ -9,6 +9,16 @@ export default function UnifiedLoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
+  // Redireciona imediatamente se já houver uma sessão válida salva no carregamento inicial
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const activeSession = localStorage.getItem('crm_session_active');
+      if (activeSession) {
+        window.location.href = '/app';
+      }
+    }
+  }, []);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -16,28 +26,22 @@ export default function UnifiedLoginPage() {
     const domain = cleanEmail.split('@')[1];
     const invalidDomains = ['gmail.com', 'gmail.com.br', 'hotmail.com', 'outlook.com', 'yahoo.com', 'outlook.com.br'];
 
-    // 1. Validação de Domínio Corporativo
     if (!domain || invalidDomains.includes(domain)) {
       alert("⚠️ Erro: Apenas e-mails corporativos/profissionais são permitidos no CorçaCRM!");
       return;
     }
 
     if (!isLoginTab) {
-      // ---- FLUXO DE CADASTRO ----
-      // Salva as credenciais diretamente no LocalStorage do navegador (banco local persistente)
+      // REGISTRO
       localStorage.setItem(`user_${cleanEmail}`, password);
-      
-      // Define qual empresa o usuário pertence com base no e-mail
       localStorage.setItem(`user_company_${cleanEmail}`, domain.split('.')[0].toUpperCase());
       
-      alert(`🎉 Cadastro realizado com sucesso!\nEmpresa: ${domain.split('.')[0].toUpperCase()}\n\nAgora você será direcionado para a aba 'Entrar' para testar suas credenciais.`);
+      alert(`🎉 Cadastro realizado com sucesso!\nEmpresa: ${domain.split('.')[0].toUpperCase()}\n\nUse a aba 'Entrar' para acessar com suas credenciais.`);
       
-      // Limpa a senha e joga o usuário para a aba de Login para testar o acesso
       setPassword('');
       setIsLoginTab(true);
     } else {
-      // ---- FLUXO DE LOGIN ----
-      // Busca a senha cadastrada para este e-mail no LocalStorage
+      // LOGIN
       const savedPassword = localStorage.getItem(`user_${cleanEmail}`);
 
       if (!savedPassword || savedPassword !== password) {
@@ -45,13 +49,19 @@ export default function UnifiedLoginPage() {
         return;
       }
 
-      // Se a senha estiver correta, salva a sessão ativa e libera o acesso ao CRM real
+      // GRAVA SESSÃO NO STORAGE
       localStorage.setItem('crm_session_active', cleanEmail);
-      router.push('/app');
+      
+      // Engenharia de Contingência Sênior: Força a navegação nativa pelo objeto window
+      // caso o router.push sofra interceptação de ciclo de vida no ambiente simulado.
+      if (router) {
+        router.push('/app');
+      } else {
+        window.location.href = '/app';
+      }
     }
   };
 
-  // Simulação de SSO Corporativo Integrado
   const handleSSOAuth = (providerName: string, sampleEmail: string) => {
     const userEmail = prompt(`[${providerName} Enterprise] Insira seu e-mail corporativo:`, sampleEmail);
     if (!userEmail) return;
@@ -63,10 +73,9 @@ export default function UnifiedLoginPage() {
       return;
     }
 
-    // Registra e autentica automaticamente via Token Simulado
-    localStorage.setItem(`user_${cleanEmail}`, 'sso_verified_token_123');
+    localStorage.setItem(`user_${cleanEmail}`, 'sso_verified_token');
     localStorage.setItem('crm_session_active', cleanEmail);
-    router.push('/app');
+    window.location.href = '/app';
   };
 
   return (
@@ -87,7 +96,7 @@ export default function UnifiedLoginPage() {
             Mova seus negócios sem trações desnecessárias.
           </h2>
           <p className="text-sm text-slate-400 max-w-sm leading-relaxed">
-            Sua conta corporativa agora é salva localmente. Cadastre seu e-mail da empresa e acesse o painel instantaneamente.
+            Sua conta corporativa agora é salva de forma persistente. Cadastre seu e-mail da empresa e acesse o painel instantaneamente.
           </p>
         </div>
 
