@@ -1,65 +1,227 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
-interface Lead {
+export type Stage = 'entrada' | 'enriquecer' | 'reuniao' | 'fim_cadencia';
+export type Temperature = 'frio' | 'morno' | 'quente';
+export type ActivityType = 'telefone' | 'email' | 'reuniao' | 'nota';
+export type Theme = 'light' | 'dark';
+export type Language = 'pt' | 'en' | 'es';
+
+export interface Activity {
   id: string;
-  name: string;
-  company: string;
-  value: number;
-  status: 'lead' | 'contacted' | 'proposal' | 'won' | 'lost';
-  email?: string;
-  phone?: string;
-  notes?: string;
+  type: ActivityType;
+  date: string;
+  content: string;
+}
+
+export interface Lead {
+  id: string;
+  nome: string;
+  cargo: string;
+  emailCorporativo: string;
+  telefoneCelular: string;
+  telefoneFixo: string;
+  nomeEmpresa: string;
+  cnpj: string;
+  linkedin: string;
+  stage: Stage;
+  temperatura: Temperature;
+  valorProposta?: number;
+  motivoPerda?: string;
+  activities: Activity[];
+  userId: string;
   createdAt: string;
-  userOwner?: string; // Engenharia: Identifica o dono do lead
+}
+
+export interface Alert {
+  id: string;
+  type: 'info' | 'warning' | 'success';
+  message: string;
+  read: boolean;
+}
+
+export interface User {
+  id: string;
+  email: string;
+  role: string;
+  empresa: string;
 }
 
 interface CRMState {
   leads: Lead[];
-  theme: 'light' | 'dark';
-  addLead: (lead: Omit<Lead, 'id' | 'createdAt'>) => void;
-  updateLeadStatus: (id: string, status: Lead['status']) => void;
+  alerts: Alert[];
+  theme: Theme;
+  currentLanguage: Language;
+  currentUser: User | null;
+  registeredUsers: User[];
+
+  addLead: (lead: Omit<Lead, 'id' | 'activities' | 'userId' | 'createdAt'>) => void;
+  updateLead: (id: string, updates: Partial<Omit<Lead, 'id' | 'userId' | 'createdAt'>>) => void;
+  updateLeadStage: (id: string, stage: Stage) => void;
+  deleteLead: (id: string) => void;
+  addActivity: (leadId: string, type: ActivityType, content: string) => void;
+
+  markAlertRead: (id: string) => void;
+  dismissAlert: (id: string) => void;
+
   toggleTheme: () => void;
+  setLanguage: (lang: Language) => void;
+
+  login: (email: string, password: string) => boolean;
+  register: (email: string, password: string) => boolean;
+  logout: () => void;
+
   clearStorage: () => void;
 }
 
+const seedLeads = (): Lead[] => {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: '1', nome: 'Roberto Silva', cargo: 'CEO', emailCorporativo: 'roberto@acme.com',
+      telefoneCelular: '+55 11 99999-0001', telefoneFixo: '', nomeEmpresa: 'Acme Corp',
+      cnpj: '', linkedin: '', stage: 'entrada', temperatura: 'morno',
+      valorProposta: 15000, activities: [], userId: 'system', createdAt: now,
+    },
+    {
+      id: '2', nome: 'Ana Costa', cargo: 'CTO', emailCorporativo: 'ana@techsol.com',
+      telefoneCelular: '+55 11 99999-0002', telefoneFixo: '', nomeEmpresa: 'TechSolutions',
+      cnpj: '', linkedin: '', stage: 'reuniao', temperatura: 'quente',
+      valorProposta: 48000, activities: [], userId: 'system', createdAt: now,
+    },
+  ];
+};
+
+const seedAlerts = (): Alert[] => [
+  { id: 'a1', type: 'warning', message: 'Lead "Ana Costa" está há 5 dias sem contato.', read: false },
+  { id: 'a2', type: 'success', message: 'Negócio de R$ 48.000 movido para Reunião.', read: false },
+  { id: 'a3', type: 'info', message: '2 novos leads importados via Excel.', read: true },
+];
+
 export const useCRMStore = create<CRMState>()(
   persist(
-    (set) => ({
-      leads: [
-        // Leads de exemplo universais
-        { id: '1', name: 'Roberto Silva', company: 'Acme Corp', value: 15000, status: 'lead', createdAt: new Date().toISOString(), userOwner: 'system' },
-        { id: '2', name: 'Ana Costa', company: 'TechSolutions', value: 48000, status: 'proposal', createdAt: new Date().toISOString(), userOwner: 'system' }
-      ],
+    (set, get) => ({
+      leads: seedLeads(),
+      alerts: seedAlerts(),
       theme: 'dark',
+      currentLanguage: 'pt',
+      currentUser: null,
+      registeredUsers: [],
 
       addLead: (newLead) => set((state) => {
-        // Captura dinamicamente quem está logado no momento do cadastro
-        const currentUser = typeof window !== 'undefined' ? localStorage.getItem('crm_current_user') || 'comum' : 'comum';
+        const currentUser = state.currentUser;
+        const userId = currentUser?.id || (typeof window !== 'undefined' ? localStorage.getItem('crm_current_user') || 'system' : 'system');
         return {
           leads: [
             ...state.leads,
             {
               ...newLead,
+              valorProposta: newLead.valorProposta ?? 0,
               id: Math.random().toString(36).substring(2, 9),
+              activities: [],
+              userId,
               createdAt: new Date().toISOString(),
-              userOwner: currentUser // Atribui o lead estritamente ao e-mail logado
-            }
-          ]
+            },
+          ],
         };
       }),
 
-      updateLeadStatus: (id, status) => set((state) => ({
-        leads: state.leads.map((lead) => 
-          lead.id === id ? { ...lead, status } : lead
-        )
+      updateLead: (id, updates) => set((state) => ({
+        leads: state.leads.map((lead) =>
+          lead.id === id ? { ...lead, ...updates } : lead
+        ),
+      })),
+
+      updateLeadStage: (id, stage) => set((state) => ({
+        leads: state.leads.map((lead) =>
+          lead.id === id ? { ...lead, stage } : lead
+        ),
+      })),
+
+      deleteLead: (id) => set((state) => ({
+        leads: state.leads.filter((lead) => lead.id !== id),
+      })),
+
+      addActivity: (leadId, type, content) => set((state) => ({
+        leads: state.leads.map((lead) =>
+          lead.id === leadId
+            ? {
+                ...lead,
+                activities: [
+                  ...lead.activities,
+                  {
+                    id: Math.random().toString(36).substring(2, 9),
+                    type,
+                    date: new Date().toISOString(),
+                    content,
+                  },
+                ],
+              }
+            : lead
+        ),
+      })),
+
+      markAlertRead: (id) => set((state) => ({
+        alerts: state.alerts.map((a) => a.id === id ? { ...a, read: true } : a),
+      })),
+
+      dismissAlert: (id) => set((state) => ({
+        alerts: state.alerts.filter((a) => a.id !== id),
       })),
 
       toggleTheme: () => set((state) => ({
-        theme: state.theme === 'dark' ? 'light' : 'dark'
+        theme: state.theme === 'dark' ? 'light' : 'dark',
       })),
 
-      clearStorage: () => set({ leads: [] })
+      setLanguage: (lang) => set({ currentLanguage: lang }),
+
+      login: (email, _password) => {
+        const state = get();
+        const user = state.registeredUsers.find((u) => u.email === email);
+        if (user) {
+          set({ currentUser: user });
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('crm_current_user', user.email);
+            localStorage.setItem('crm_session_active', 'true');
+          }
+          return true;
+        }
+        return false;
+      },
+
+      register: (email, _password) => {
+        const state = get();
+        const existing = state.registeredUsers.find((u) => u.email === email);
+        if (existing) return false;
+
+        const domain = email.split('@')[1] || 'empresa';
+        const company = domain.split('.')[0].charAt(0).toUpperCase() + domain.split('.')[0].slice(1);
+        const newUser: User = {
+          id: Math.random().toString(36).substring(2, 9),
+          email,
+          role: 'admin_principal',
+          empresa: company,
+        };
+        set({
+          registeredUsers: [...state.registeredUsers, newUser],
+          currentUser: newUser,
+        });
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('crm_current_user', newUser.email);
+          localStorage.setItem('crm_session_active', 'true');
+        }
+        return true;
+      },
+
+      logout: () => {
+        set({ currentUser: null });
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('crm_current_user');
+          localStorage.removeItem('crm_session_active');
+        }
+      },
+
+      clearStorage: () => set({ leads: [], alerts: [] }),
     }),
     {
       name: 'corca_crm_storage',

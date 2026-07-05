@@ -18,7 +18,6 @@ import { AIAssistant } from '@/src/components/AIAssistant';
 export type ViewType = 'dashboard' | 'kanban' | 'leads' | 'analytics' | 'team' | 'settings';
 
 export default function AppPage() {
-  const restoreSession = useCRMStore((s) => s.restoreSession);
   const theme = useCRMStore((s) => s.theme);
   const [activeView, setActiveView] = useState<ViewType>('dashboard');
   const [showAlerts, setShowAlerts] = useState(false);
@@ -37,10 +36,9 @@ export default function AppPage() {
       return;
     }
 
-    restoreSession(session);
     setIsAuthorized(true);
     setIsLoading(false);
-  }, [restoreSession]);
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
