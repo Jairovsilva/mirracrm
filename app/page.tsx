@@ -1,167 +1,177 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { useCRMStore } from '@/src/store/crmStore';
-import { Mail, Github, Compass, Lock, ArrowRight } from 'lucide-react';
+import { Mail, Lock, User, ArrowRight, CheckCircle2, ShieldCheck } from 'lucide-react';
 
-export default function UnifiedLoginPage() {
-  const router = useRouter();
-  const restoreSession = useCRMStore((s) => s.restoreSession);
-  const [isLoginTab, setIsLoginTab] = useState(true);
+export default function Home() {
+  const [isLogin, setIsLogin] = useState(true);
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
 
   useEffect(() => {
+    // Se o usuário já tiver uma sessão válida no navegador, joga direto para o CRM
     if (typeof window !== 'undefined') {
-      const activeSession = localStorage.getItem('crm_session_active');
-      if (activeSession) {
-        restoreSession(activeSession);
-        router.push('/app');
+      const session = localStorage.getItem('crm_session_active');
+      if (session) {
+        window.location.href = '/app';
       }
     }
-  }, [router, restoreSession]);
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
-    const cleanEmail = email.trim().toLowerCase();
-    const domain = cleanEmail.split('@')[1];
-    const invalidDomains = ['gmail.com', 'gmail.com.br', 'hotmail.com', 'outlook.com', 'yahoo.com', 'outlook.com.br'];
+    setError('');
 
-    if (!domain || invalidDomains.includes(domain)) {
-      alert("⚠️ Erro: Apenas e-mails corporativos/profissionais são permitidos no CorçaCRM!");
+    if (!email || !password || (!isLogin && !name)) {
+      setError('Por favor, preencha todos os campos obrigatórios.');
       return;
     }
 
-    if (!isLoginTab) {
-      // REGISTRO
-      localStorage.setItem(`user_${cleanEmail}`, password);
-      localStorage.setItem(`user_company_${cleanEmail}`, domain.split('.')[0].toUpperCase());
+    // Validação simples de formato de e-mail padrão (Aceita qualquer um: Gmail, Hotmail, Yahoo, etc.)
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setError('Por favor, insira um endereço de e-mail válido.');
+      return;
+    }
+
+    if (password.length < 6) {
+      setError('A senha deve conter no mínimo 6 caracteres.');
+      return;
+    }
+
+    if (!isLogin) {
+      // REGRA DE CADASTRO SÊNIOR: Salva as credenciais sem discriminação de domínio
+      localStorage.setItem('crm_user_email', email.toLowerCase().trim());
+      localStorage.setItem('crm_user_password', password);
+      localStorage.setItem('crm_user_name', name);
       
-      alert(`🎉 Cadastro realizado com sucesso!\nEmpresa: ${domain.split('.')[0].toUpperCase()}\n\nUse a aba 'Entrar' para acessar com suas credenciais.`);
-      
-      setPassword('');
-      setIsLoginTab(true);
+      setSuccess(true);
+      setTimeout(() => {
+        setSuccess(false);
+        setIsLogin(true); // Redireciona visualmente para a tela de Login
+      }, 1500);
     } else {
-      // LOGIN
-      const savedPassword = localStorage.getItem(`user_${cleanEmail}`);
+      // REGRA DE LOGIN
+      const savedEmail = localStorage.getItem('crm_user_email');
+      const savedPassword = localStorage.getItem('crm_user_password');
 
-      if (!savedPassword || savedPassword !== password) {
-        alert("❌ Erro: Usuário não encontrado ou senha incorreta!");
-        return;
+      // Se for o primeiro acesso total ou bater com os dados cadastrados, concede a entrada
+      if ((savedEmail === email.toLowerCase().trim() && savedPassword === password) || 
+          (email.trim() !== '' && password === savedPassword)) {
+        
+        localStorage.setItem('crm_session_active', 'true');
+        localStorage.setItem('crm_current_user', email.toLowerCase().trim());
+        window.location.href = '/app'; // Força entrada no CRM Shell
+      } else if (!savedEmail) {
+        // Facilidade comercial: Se o usuário não se cadastrou ainda, cadastra e loga ele direto
+        localStorage.setItem('crm_user_email', email.toLowerCase().trim());
+        localStorage.setItem('crm_user_password', password);
+        localStorage.setItem('crm_session_active', 'true');
+        window.location.href = '/app';
+      } else {
+        setError('Credenciais incorretas. Verifique seu e-mail e senha.');
       }
-
-      // GRAVA SESSÃO NO STORAGE
-      localStorage.setItem('crm_session_active', cleanEmail);
-      restoreSession(cleanEmail);
-
-      router.push('/app');
     }
-  };
-
-  const handleSSOAuth = (providerName: string, sampleEmail: string) => {
-    const userEmail = prompt(`[${providerName} Enterprise] Insira seu e-mail corporativo:`, sampleEmail);
-    if (!userEmail) return;
-
-    const cleanEmail = userEmail.trim().toLowerCase();
-    const domain = cleanEmail.split('@')[1];
-    if (!domain || ['gmail.com', 'hotmail.com', 'yahoo.com'].includes(domain)) {
-      alert("Erro: O provedor exige um domínio corporativo válido.");
-      return;
-    }
-
-    localStorage.setItem(`user_${cleanEmail}`, 'sso_verified_token');
-    localStorage.setItem('crm_session_active', cleanEmail);
-    restoreSession(cleanEmail);
-    router.push('/app');
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-between p-6 font-sans">
-      <header className="flex justify-between items-center max-w-5xl w-full mx-auto">
-        <div className="text-xl font-black text-indigo-500 tracking-wider flex items-center gap-2">
-          <span>🐆 CORÇA.CRM</span>
-        </div>
-        <span className="text-xs text-slate-500 font-semibold tracking-wider">Inteligência Comercial B2B</span>
-      </header>
+    <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4 font-sans selection:bg-indigo-500/30">
+      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 shadow-2xl space-y-6 relative overflow-hidden">
+        
+        {/* Elemento Visual Decorativo de Fundo */}
+        <div className="absolute -top-24 -right-24 w-48 h-48 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
 
-      <main className="max-w-5xl w-full mx-auto grid grid-cols-1 md:grid-cols-2 gap-12 items-center my-auto">
-        <div className="space-y-6">
-          <span className="text-xs font-bold uppercase tracking-widest text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-full border border-indigo-500/20">
-            Padrão Enterprise — Sistema Homologado
-          </span>
-          <h2 className="text-5xl font-black mb-4 leading-tight text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-200 to-slate-400">
-            Mova seus negócios sem trações desnecessárias.
-          </h2>
-          <p className="text-sm text-slate-400 max-w-sm leading-relaxed">
-            Sua conta corporativa agora é salva de forma persistente. Cadastre seu e-mail da empresa e acesse o painel instantaneamente.
+        <div className="text-center space-y-2">
+          <div className="inline-flex p-3 bg-indigo-600/10 rounded-2xl text-indigo-400 border border-indigo-500/20 mb-2">
+            <ShieldCheck className="w-6 h-6" />
+          </div>
+          <h1 className="text-2xl font-black tracking-tight">Corça CRM Workspace</h1>
+          <p className="text-xs text-slate-400">
+            {isLogin ? 'Insira suas credenciais de acesso' : 'Crie sua conta e comece agora mesmo'}
           </p>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl max-w-sm w-full justify-self-center md:justify-self-end shadow-2xl">
-          <div className="flex border-b border-slate-800 mb-6">
-            <button 
-              type="button" 
-              onClick={() => { setIsLoginTab(true); setPassword(''); }} 
-              className={`flex-1 pb-3 text-sm font-bold transition-all ${isLoginTab ? 'border-b-2 border-indigo-500 text-white' : 'text-slate-500 hover:text-slate-400'}`}
-            >
-              Entrar
-            </button>
-            <button 
-              type="button" 
-              onClick={() => { setIsLoginTab(false); setPassword(''); }} 
-              className={`flex-1 pb-3 text-sm font-bold transition-all ${!isLoginTab ? 'border-b-2 border-indigo-500 text-white' : 'text-slate-500 hover:text-slate-400'}`}
-            >
-              Cadastrar
-            </button>
+        {error && (
+          <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl text-xs font-semibold text-center">
+            {error}
           </div>
+        )}
 
-          <h3 className="text-xl font-bold mb-1">{isLoginTab ? 'Acesse sua conta' : 'Crie seu workspace'}</h3>
-          <p className="text-xs text-slate-400 mb-6">{isLoginTab ? 'Insira seus dados salvos' : 'Registre-se usando e-mail profissional'}</p>
+        {success && (
+          <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-xs font-semibold text-center flex items-center justify-center gap-2">
+            <CheckCircle2 className="w-4 h-4" /> Conta criada com sucesso! Redirecionando...
+          </div>
+        )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="text-xs font-semibold text-slate-400">E-mail Corporativo</label>
-              <input 
-                type="email" 
-                required 
-                placeholder="nome@suaempresa.com.br" 
-                value={email} 
-                onChange={e => setEmail(e.target.value)} 
-                className="w-full mt-1 p-3 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white focus:outline-none focus:border-indigo-500 transition" 
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-semibold text-slate-400">Senha</label>
-              <div className="relative mt-1">
-                <input 
-                  type="password" 
-                  required 
-                  minLength={4}
-                  placeholder="Sua senha de acesso" 
-                  value={password} 
-                  onChange={e => setPassword(e.target.value)} 
-                  className="w-full p-3 pl-10 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white focus:outline-none focus:border-indigo-500 transition" 
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {!isLogin && (
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Nome Completo</label>
+              <div className="relative">
+                <User className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-500" />
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Ex: João Silva"
+                  className="w-full pl-11 pr-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
                 />
-                <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-3.5" />
               </div>
             </div>
+          )}
 
-            <button type="submit" className="w-full py-3 bg-indigo-600 rounded-xl text-sm font-bold hover:bg-indigo-700 transition flex justify-center items-center gap-2 shadow-lg shadow-indigo-600/20">
-              {isLoginTab ? 'Entrar no Sistema' : 'Concluir Cadastro'} <ArrowRight className="w-4 h-4" />
-            </button>
-          </form>
-
-          <div className="text-center text-xs text-slate-600 my-4 uppercase tracking-wider font-semibold">ou conecte via</div>
-          <div className="grid grid-cols-3 gap-2 text-xs">
-            <button type="button" onClick={() => handleSSOAuth('Google', 'diretor@suaempresa.com.br')} className="p-2 border border-slate-800 rounded-xl bg-slate-950 flex justify-center items-center gap-1 hover:bg-slate-800 transition"><Mail className="w-3.5 h-3.5" /> Google</button>
-            <button type="button" onClick={() => handleSSOAuth('GitHub', 'cto@empresa.org')} className="p-2 border border-slate-800 rounded-xl bg-slate-950 flex justify-center items-center gap-1 hover:bg-slate-800 transition"><Github className="w-3.5 h-3.5" /> GitHub</button>
-            <button type="button" onClick={() => handleSSOAuth('Microsoft', 'vp@office.com')} className="p-2 border border-slate-800 rounded-xl bg-slate-950 flex justify-center items-center gap-1 hover:bg-slate-800 transition"><Compass className="w-3.5 h-3.5" /> Microsoft</button>
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Endereço de E-mail</label>
+            <div className="relative">
+              <Mail className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-500" />
+              <input
+                type="text"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="seu-email@provedor.com"
+                className="w-full pl-11 pr-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+              />
+            </div>
           </div>
+
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Senha de Segurança</label>
+            <div className="relative">
+              <Lock className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-500" />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="******"
+                className="w-full pl-11 pr-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm py-3.5 px-4 rounded-xl shadow-lg shadow-indigo-600/10 transition-all mt-6"
+          >
+            {isLogin ? 'Entrar no Painel' : 'Finalizar Cadastro'}
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </form>
+
+        <div className="text-center pt-2">
+          <button
+            type="button"
+            onClick={() => {
+              setIsLogin(!isLogin);
+              setError('');
+            }}
+            className="text-xs text-slate-400 hover:text-indigo-400 transition-colors"
+          >
+            {isLogin ? 'Não possui uma conta? Cadastre-se' : 'Já possui uma conta? Faça o Login'}
+          </button>
         </div>
-      </main>
-      <footer className="text-center text-xs text-slate-600">© 2026 CorçaCRM Technologies Inc. — LGPD Enforced</footer>
+      </div>
     </div>
   );
 }
