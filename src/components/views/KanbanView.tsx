@@ -1,5 +1,5 @@
 'use client';
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { useCRMStore, type Stage } from '@/src/store/crmStore';
 import { FileSpreadsheet, Trash2, GripVertical, Search, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -17,6 +17,23 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<Stage | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // 🔐 ENGENHARIA SÊNIOR: Estado para armazenar o usuário logado com segurança no Client-side
+  const [currentUserEmail, setCurrentUserEmail] = useState('');
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      // Captura o e-mail da pessoa que acabou de logar
+      setCurrentUserEmail(localStorage.getItem('crm_current_user') || '');
+    }
+  }, []);
+
+  // 🛡️ ISOLAMENTO DE DADOS: Filtra os leads globais para exibir APENAS os deste usuário ou exemplos do sistema
+  const myLeads = leads.filter(l => {
+    // Se o seu store usa 'userOwner', filtramos por ele. Caso contrário, se o objeto não tiver dono ainda,
+    // garantimos compatibilidade retroativa para que você não perca os leads que já criou antes da trava.
+    return !l.userOwner || l.userOwner === currentUserEmail || l.userOwner === 'system';
+  });
 
   const mapRowToLead = (row: any) => {
     const keys = Object.keys(row);
@@ -47,6 +64,7 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
       cnpj: cnpj,
       temperatura: 'frio' as const,
       stage: 'entrada' as const,
+      userOwner: currentUserEmail // Grava a propriedade do dono ao importar via Excel
     };
   };
 
@@ -143,9 +161,14 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
   return (
     <div className="space-y-6">
       <div className="space-y-4 border-b border-slate-800 pb-5">
-        <div className="flex flex-row justify-between items-center gap-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-2xl font-black tracking-tight">Pipeline de Vendas B2B</h1>
+            {currentUserEmail && (
+              <p className="text-xs text-indigo-400 font-medium mb-1">
+                Logado como: <span className="font-bold underline">{currentUserEmail}</span>
+              </p>
+            )}
             <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>Arraste os cards entre as etapas ou clique para abrir o detalhe do lead.</p>
           </div>
 
@@ -189,101 +212,4 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {columns.map(column => {
-          const filteredLeads = leads.filter(l => {
-            if (l.stage !== column.id) return false;
-            if (!searchQuery.trim()) return true;
-            const q = searchQuery.toLowerCase().trim();
-            return (
-              l.nome.toLowerCase().includes(q) ||
-              l.nomeEmpresa.toLowerCase().includes(q) ||
-              l.emailCorporativo.toLowerCase().includes(q) ||
-              l.cargo.toLowerCase().includes(q)
-            );
-          });
-          const isDragOver = dragOverColumn === column.id;
-          return (
-            <div
-              key={column.id}
-              onDragOver={(e) => handleDragOver(e, column.id)}
-              onDragLeave={(e) => handleDragLeave(e, column.id)}
-              onDrop={(e) => handleDrop(e, column.id)}
-              className={`p-4 rounded-2xl border min-h-[500px] flex flex-col transition-colors ${
-                isDragOver
-                  ? 'border-indigo-500 bg-indigo-500/5'
-                  : theme === 'dark'
-                    ? 'bg-slate-900/40 border-slate-800'
-                    : 'bg-white border-slate-200 shadow-sm'
-              }`}
-            >
-              <div className={`p-2.5 rounded-xl border text-xs font-black mb-4 uppercase tracking-wider flex justify-between items-center ${column.color}`}>
-                <span>{column.title}</span>
-                <span className="px-2 py-0.5 rounded-md bg-black/20 text-[10px]">{filteredLeads.length}</span>
-              </div>
-
-              <div className="flex-1 space-y-3 overflow-y-auto max-h-[600px] pr-1">
-                {filteredLeads.map(lead => (
-                  <div
-                    key={lead.id}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, lead.id)}
-                    onDragEnd={handleDragEnd}
-                    onClick={() => onOpenLead(lead.id)}
-                    className={`group p-4 rounded-xl border transition-all cursor-pointer ${
-                      draggedLeadId === lead.id
-                        ? 'opacity-40 border-dashed border-indigo-500'
-                        : theme === 'dark'
-                          ? 'bg-slate-900 border-slate-800 hover:border-indigo-500/50 hover:shadow-lg hover:shadow-indigo-500/10'
-                          : 'bg-slate-50 border-slate-200 shadow-sm hover:border-indigo-500/50 hover:shadow-md'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                        <GripVertical className={`w-3.5 h-3.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity ${
-                          theme === 'dark' ? 'text-slate-600' : 'text-slate-400'
-                        }`} />
-                        <div className="font-bold text-sm truncate">{lead.nome}</div>
-                      </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (confirm(`Excluir o lead "${lead.nome}"?`)) {
-                            deleteLead(lead.id);
-                          }
-                        }}
-                        className={`p-1 rounded-md opacity-0 group-hover:opacity-100 transition-all flex-shrink-0 ${
-                          theme === 'dark'
-                            ? 'text-slate-600 hover:text-rose-400 hover:bg-rose-500/10'
-                            : 'text-slate-400 hover:text-rose-500 hover:bg-rose-500/10'
-                        }`}
-                        title="Excluir lead"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                    <div className="text-xs text-indigo-500 font-semibold mb-2 truncate pl-5">{lead.nomeEmpresa}</div>
-                    {lead.emailCorporativo && (
-                      <div className="text-[11px] text-slate-400 truncate mb-1 pl-5">✉️ {lead.emailCorporativo}</div>
-                    )}
-                    {lead.cargo && (
-                      <div className={`mt-2 pt-2 border-t text-[10px] line-clamp-2 leading-relaxed pl-5 ${
-                        theme === 'dark' ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-600'
-                      }`}>
-                        {lead.cargo}
-                      </div>
-                    )}
-                  </div>
-                ))}
-                {filteredLeads.length === 0 && (
-                  <div className="text-center text-xs text-slate-600 py-12 border-2 border-dashed border-slate-800/10 rounded-xl my-auto">
-                    Nenhum lead nesta etapa
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
+        {
