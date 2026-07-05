@@ -1,6 +1,6 @@
 'use client';
 import React, { useRef, useState } from 'react';
-import { useCRMStore } from '@/src/store/crmStore';
+import { useCRMStore, type Stage } from '@/src/store/crmStore';
 import { FileSpreadsheet } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -36,13 +36,16 @@ export default function KanbanView() {
     ].filter(Boolean).join(' | ');
 
     return {
-      name: name || 'Lead Sem Nome',
-      company: company || 'Empresa Não Identificada',
-      value: 0,
-      status: 'lead' as const, // Força os dados a entrarem na aba de "Entrada"
-      email: email || undefined,
-      phone: phone || undefined,
-      notes: notes || undefined
+      nome: name || 'Lead Sem Nome',
+      cargo: role,
+      emailCorporativo: email || '',
+      linkedin: linkedin,
+      telefoneCelular: phone || '',
+      telefoneFixo: '',
+      nomeEmpresa: company || 'Empresa Não Identificada',
+      cnpj: cnpj,
+      temperatura: 'frio' as const,
+      stage: 'entrada' as const,
     };
   };
 
@@ -74,7 +77,7 @@ export default function KanbanView() {
 
         jsonData.forEach((row: any) => {
           const formattedLead = mapRowToLead(row);
-          if (formattedLead.name !== 'Lead Sem Nome' || formattedLead.company !== 'Empresa Não Identificada') {
+          if (formattedLead.nome !== 'Lead Sem Nome' || formattedLead.nomeEmpresa !== 'Empresa Não Identificada') {
             addLead(formattedLead);
             importedCount++;
           }
@@ -93,12 +96,11 @@ export default function KanbanView() {
     reader.readAsBinaryString(file);
   };
 
-  const columns: { title: string; id: 'lead' | 'contacted' | 'proposal' | 'won' | 'lost'; color: string }[] = [
-    { title: 'Entrada (Leads)', id: 'lead', color: 'bg-indigo-500/10 border-indigo-500/30 text-indigo-400' },
-    { title: 'Contatados', id: 'contacted', color: 'bg-amber-500/10 border-amber-500/30 text-amber-400' },
-    { title: 'Proposta Enviada', id: 'proposal', color: 'bg-sky-500/10 border-sky-500/30 text-sky-400' },
-    { title: 'Ganhos (Won)', id: 'won', color: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' },
-    { title: 'Perdidos (Lost)', id: 'lost', color: 'bg-rose-500/10 border-rose-500/30 text-rose-400' }
+  const columns: { title: string; id: Stage; color: string }[] = [
+    { title: 'Entrada', id: 'entrada', color: 'bg-indigo-500/10 border-indigo-500/30 text-indigo-400' },
+    { title: 'Enriquecer', id: 'enriquecer', color: 'bg-amber-500/10 border-amber-500/30 text-amber-400' },
+    { title: 'Reunião', id: 'reuniao', color: 'bg-sky-500/10 border-sky-500/30 text-sky-400' },
+    { title: 'Fim de Cadência', id: 'fim_cadencia', color: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' },
   ];
 
   return (
@@ -124,7 +126,7 @@ export default function KanbanView() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
         {columns.map(column => {
-          const filteredLeads = leads.filter(l => l.status === column.id);
+          const filteredLeads = leads.filter(l => l.stage === column.id);
           return (
             <div key={column.id} className={`p-4 rounded-2xl border min-h-[500px] flex flex-col ${
               theme === 'dark' ? 'bg-slate-900/40 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
@@ -139,14 +141,14 @@ export default function KanbanView() {
                   <div key={lead.id} className={`p-4 rounded-xl border transition-all ${
                     theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200 shadow-sm'
                   }`}>
-                    <div className="font-bold text-sm truncate">{lead.name}</div>
-                    <div className="text-xs text-indigo-500 font-semibold mb-2 truncate">{lead.company}</div>
-                    {lead.email && <div className="text-[11px] text-slate-400 truncate mb-1">✉️ {lead.email}</div>}
-                    {lead.notes && (
+                    <div className="font-bold text-sm truncate">{lead.nome}</div>
+                    <div className="text-xs text-indigo-500 font-semibold mb-2 truncate">{lead.nomeEmpresa}</div>
+                    {lead.emailCorporativo && <div className="text-[11px] text-slate-400 truncate mb-1">✉️ {lead.emailCorporativo}</div>}
+                    {lead.cargo && (
                       <div className={`mt-2 pt-2 border-t text-[10px] line-clamp-2 leading-relaxed ${
                         theme === 'dark' ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-600'
                       }`}>
-                        {lead.notes}
+                        {lead.cargo}
                       </div>
                     )}
                   </div>

@@ -5,7 +5,7 @@ import { useCRMStore } from '@/src/store/crmStore';
 import { Sidebar } from '@/src/components/layout/Sidebar';
 import { Header } from '@/src/components/layout/Header';
 import { DashboardView } from '@/src/components/views/DashboardView';
-import { KanbanView } from '@/src/components/views/KanbanView';
+import KanbanView from '@/src/components/views/KanbanView';
 import { LeadsView } from '@/src/components/views/LeadsView';
 import { AnalyticsView } from '@/src/components/views/AnalyticsView';
 import { TeamView } from '@/src/components/views/TeamView';
@@ -114,13 +114,7 @@ export default function AppPage() {
               onViewKanban={handleViewKanban}
             />
           )}
-          {activeView === 'kanban' && (
-            <KanbanView
-              onOpenLead={handleOpenLead}
-              onAddLead={handleAddLead}
-              onEditLead={handleEditLead}
-            />
-          )}
+          {activeView === 'kanban' && <KanbanView />}
           {activeView === 'leads' && (
             <LeadsView
               onOpenLead={handleOpenLead}
