@@ -1,232 +1,165 @@
 'use client';
+import React, { useRef, useState } from 'react';
+import { useCRMStore } from '@/src/store/crmStore';
+import { FileSpreadsheet } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
-import { useState, useRef } from 'react';
-import { useTranslation } from '@/src/lib/useTranslation';
-import { useCRMStore, type Stage, type Lead } from '@/src/store/crmStore';
-import { TemperatureBadge } from '@/src/components/leads/TemperatureBadge';
-import { Button } from '@/components/ui/button';
-import { Plus, MoreVertical, Building2, Mail, Phone, Pencil, Trash2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+export default function KanbanView() {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { leads, addLead, theme } = useCRMStore();
+  const [isProcessing, setIsProcessing] = useState(false);
 
-interface KanbanViewProps {
-  onOpenLead: (id: string) => void;
-  onAddLead: () => void;
-  onEditLead: (id: string) => void;
-}
+  // Interpretador Inteligente para ler a planilha Excel
+  const mapRowToLead = (row: any) => {
+    const keys = Object.keys(row);
+    
+    const findValue = (possibleNames: string[]) => {
+      const foundKey = keys.find(k => 
+        possibleNames.some(name => k.toLowerCase().trim().replace(/[^a-z0-9]/g, '') === name)
+      );
+      return foundKey ? String(row[foundKey]).trim() : '';
+    };
 
-const stageOrder: Stage[] = ['entrada', 'enriquecer', 'reuniao', 'fim_cadencia'];
+    const name = findValue(['nome', 'contato', 'lead', 'clientename']);
+    const company = findValue(['empresa', 'razaosocial', 'companhia', 'organization']);
+    const email = findValue(['email', 'emailcorporativo', 'mail', 'correio']);
+    const role = findValue(['cargo', 'funcao', 'posicao', 'role']);
+    const linkedin = findValue(['linkedin', 'url', 'perfil']);
+    const phone = findValue(['telefone', 'celular', 'fixo', 'whatsapp', 'phone', 'mobile']);
+    const cnpj = findValue(['cnpj', 'cadastro', 'documento']).replace(/[^0-9]/g, '');
 
-const stageHeaderColors: Record<Stage, string> = {
-  entrada: 'border-t-blue-500',
-  enriquecer: 'border-t-emerald-500',
-  reuniao: 'border-t-amber-500',
-  fim_cadencia: 'border-t-slate-500',
-};
+    const notes = [
+      role ? `Cargo: ${role}` : '',
+      linkedin ? `LinkedIn: ${linkedin}` : '',
+      cnpj ? `CNPJ: ${cnpj}` : '',
+      phone ? `Tel: ${phone}` : ''
+    ].filter(Boolean).join(' | ');
 
-export function KanbanView({ onOpenLead, onAddLead, onEditLead }: KanbanViewProps) {
-  const { t } = useTranslation();
-  const leads = useCRMStore((s) => s.leads);
-  const updateLeadStage = useCRMStore((s) => s.updateLeadStage);
-  const deleteLead = useCRMStore((s) => s.deleteLead);
-  const [draggedId, setDraggedId] = useState<string | null>(null);
-  const [dragOverStage, setDragOverStage] = useState<Stage | null>(null);
-  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
-
-  const handleDragStart = (e: React.DragEvent, leadId: string) => {
-    setDraggedId(leadId);
-    e.dataTransfer.effectAllowed = 'move';
+    return {
+      name: name || 'Lead Sem Nome',
+      company: company || 'Empresa Não Identificada',
+      value: 0,
+      status: 'lead' as const, // Força os dados a entrarem na aba de "Entrada"
+      email: email || undefined,
+      phone: phone || undefined,
+      notes: notes || undefined
+    };
   };
 
-  const handleDragOver = (e: React.DragEvent, stage: Stage) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    setDragOverStage(stage);
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsProcessing(true);
+    const file = files[0];
+    const reader = new FileReader();
+
+    reader.onload = (event) => {
+      try {
+        const data = event.target?.result;
+        if (!data) throw new Error('Falha no buffer do arquivo.');
+
+        const workbook = XLSX.read(data, { type: 'binary' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+        if (jsonData.length === 0) {
+          alert('⚠️ A planilha selecionada está vazia.');
+          setIsProcessing(false);
+          return;
+        }
+
+        let importedCount = 0;
+
+        jsonData.forEach((row: any) => {
+          const formattedLead = mapRowToLead(row);
+          if (formattedLead.name !== 'Lead Sem Nome' || formattedLead.company !== 'Empresa Não Identificada') {
+            addLead(formattedLead);
+            importedCount++;
+          }
+        });
+
+        alert(`🎉 Sucesso! Foram importados ${importedCount} contatos diretamente para a etapa de Entrada do seu Funil.`);
+      } catch (error) {
+        console.error(error);
+        alert('❌ Erro ao ler arquivo Excel. Verifique a formatação das colunas.');
+      } finally {
+        setIsProcessing(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    };
+
+    reader.readAsBinaryString(file);
   };
 
-  const handleDrop = (e: React.DragEvent, stage: Stage) => {
-    e.preventDefault();
-    if (draggedId) {
-      updateLeadStage(draggedId, stage);
-    }
-    setDraggedId(null);
-    setDragOverStage(null);
-  };
-
-  const handleDragEnd = () => {
-    setDraggedId(null);
-    setDragOverStage(null);
-  };
+  const columns: { title: string; id: 'lead' | 'contacted' | 'proposal' | 'won' | 'lost'; color: string }[] = [
+    { title: 'Entrada (Leads)', id: 'lead', color: 'bg-indigo-500/10 border-indigo-500/30 text-indigo-400' },
+    { title: 'Contatados', id: 'contacted', color: 'bg-amber-500/10 border-amber-500/30 text-amber-400' },
+    { title: 'Proposta Enviada', id: 'proposal', color: 'bg-sky-500/10 border-sky-500/30 text-sky-400' },
+    { title: 'Ganhos (Won)', id: 'won', color: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' },
+    { title: 'Perdidos (Lost)', id: 'lost', color: 'bg-rose-500/10 border-rose-500/30 text-rose-400' }
+  ];
 
   return (
-    <div className="h-full flex flex-col">
-      {/* Header */}
-      <div className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-800 pb-5">
         <div>
-          <h1 className="text-xl font-bold">{t.nav.kanban}</h1>
-          <p className="text-sm text-muted-foreground">{leads.length} {t.nav.leads.toLowerCase()}</p>
+          <h1 className="text-2xl font-black tracking-tight">Pipeline de Vendas B2B</h1>
+          <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>Gerencie seus leads comerciais em tempo real.</p>
         </div>
-        <Button onClick={onAddLead} size="sm">
-          <Plus className="w-4 h-4 mr-1.5" />
-          {t.lead.addLead}
-        </Button>
+
+        <div>
+          <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".xlsx, .xls" className="hidden" />
+          <button
+            type="button"
+            disabled={isProcessing}
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-3 px-4 rounded-xl shadow-lg transition-all disabled:opacity-50"
+          >
+            {isProcessing ? 'Mapeando Linhas...' : <> <FileSpreadsheet className="w-4 h-4" /> Importar Lista Excel </>}
+          </button>
+        </div>
       </div>
 
-      {/* Board */}
-      <div className="flex-1 overflow-x-auto kanban-scroll p-4 md:p-6">
-        <div className="flex gap-4 min-w-max h-full">
-          {stageOrder.map((stage) => {
-            const stageLeads = leads.filter((l) => l.stage === stage);
-            return (
-              <div
-                key={stage}
-                onDragOver={(e) => handleDragOver(e, stage)}
-                onDrop={(e) => handleDrop(e, stage)}
-                onDragLeave={() => setDragOverStage(null)}
-                className={cn(
-                  'w-72 md:w-80 shrink-0 flex flex-col rounded-xl bg-secondary/40 border border-border border-t-4 transition-colors',
-                  stageHeaderColors[stage],
-                  dragOverStage === stage && 'bg-primary/5 border-primary/30'
-                )}
-              >
-                {/* Column header */}
-                <div className="px-4 py-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-semibold text-sm">{t.stages[stage]}</h3>
-                    <span className="text-xs font-medium text-muted-foreground bg-secondary px-2 py-0.5 rounded-full">
-                      {stageLeads.length}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Cards */}
-                <div className="flex-1 overflow-y-auto scrollbar-thin px-3 pb-3 space-y-2.5 min-h-[100px]">
-                  {stageLeads.length === 0 ? (
-                    <div className="flex items-center justify-center h-20 text-xs text-muted-foreground border border-dashed border-border rounded-lg">
-                      {t.lead.noLeads}
-                    </div>
-                  ) : (
-                    stageLeads.map((lead) => (
-                      <KanbanCard
-                        key={lead.id}
-                        lead={lead}
-                        isDragging={draggedId === lead.id}
-                        onDragStart={(e) => handleDragStart(e, lead.id)}
-                        onDragEnd={handleDragEnd}
-                        onClick={() => onOpenLead(lead.id)}
-                        menuOpen={menuOpenId === lead.id}
-                        onMenuToggle={() => setMenuOpenId(menuOpenId === lead.id ? null : lead.id)}
-                        onEdit={() => {
-                          onEditLead(lead.id);
-                          setMenuOpenId(null);
-                        }}
-                        onDelete={() => {
-                          deleteLead(lead.id);
-                          setMenuOpenId(null);
-                        }}
-                      />
-                    ))
-                  )}
-                </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+        {columns.map(column => {
+          const filteredLeads = leads.filter(l => l.status === column.id);
+          return (
+            <div key={column.id} className={`p-4 rounded-2xl border min-h-[500px] flex flex-col ${
+              theme === 'dark' ? 'bg-slate-900/40 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
+            }`}>
+              <div className={`p-2.5 rounded-xl border text-xs font-black mb-4 uppercase tracking-wider flex justify-between items-center ${column.color}`}>
+                <span>{column.title}</span>
+                <span className="px-2 py-0.5 rounded-md bg-black/20 text-[10px]">{filteredLeads.length}</span>
               </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
 
-interface KanbanCardProps {
-  lead: Lead;
-  isDragging: boolean;
-  onDragStart: (e: React.DragEvent) => void;
-  onDragEnd: () => void;
-  onClick: () => void;
-  menuOpen: boolean;
-  onMenuToggle: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-}
-
-function KanbanCard({ lead, isDragging, onDragStart, onDragEnd, onClick, menuOpen, onMenuToggle, onEdit, onDelete }: KanbanCardProps) {
-  const cardRef = useRef<HTMLDivElement>(null);
-  return (
-    <div
-      ref={cardRef}
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-      onClick={onClick}
-      className={cn(
-        'group relative bg-card rounded-lg border border-border p-3.5 cursor-pointer hover:shadow-md hover:border-primary/30 transition-all duration-200',
-        isDragging && 'opacity-40 rotate-2'
-      )}
-    >
-      {/* Menu button */}
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onMenuToggle();
-        }}
-        className="absolute top-2.5 right-2.5 p-1 rounded-md text-muted-foreground hover:bg-secondary opacity-0 group-hover:opacity-100 transition-opacity"
-      >
-        <MoreVertical className="w-4 h-4" />
-      </button>
-
-      {/* Dropdown menu */}
-      {menuOpen && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={(e) => { e.stopPropagation(); onMenuToggle(); }} />
-          <div className="absolute top-8 right-2 z-20 w-36 rounded-lg border border-border bg-popover shadow-lg overflow-hidden animate-scale-in">
-            <button
-              onClick={(e) => { e.stopPropagation(); onEdit(); }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary transition-colors text-left"
-            >
-              <Pencil className="w-3.5 h-3.5" />
-              Editar
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); onDelete(); }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-destructive/10 hover:text-destructive transition-colors text-left"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Excluir
-            </button>
-          </div>
-        </>
-      )}
-
-      {/* Header */}
-      <div className="flex items-start gap-2.5 mb-2.5">
-        <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-xs shrink-0">
-          {lead.nome[0]?.toUpperCase()}
-        </div>
-        <div className="min-w-0 flex-1">
-          <h4 className="font-semibold text-sm truncate pr-6">{lead.nome}</h4>
-          <p className="text-xs text-muted-foreground truncate">{lead.cargo}</p>
-        </div>
-      </div>
-
-      {/* Company */}
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2.5">
-        <Building2 className="w-3 h-3 shrink-0" />
-        <span className="truncate">{lead.nomeEmpresa}</span>
-      </div>
-
-      {/* Contact icons */}
-      <div className="flex items-center gap-2 mb-3 text-muted-foreground">
-        {lead.emailCorporativo && <Mail className="w-3.5 h-3.5" />}
-        {lead.telefoneCelular && <Phone className="w-3.5 h-3.5" />}
-      </div>
-
-      {/* Footer */}
-      <div className="flex items-center justify-between pt-2.5 border-t border-border">
-        <TemperatureBadge temperature={lead.temperatura} size="xs" />
-        {lead.valorProposta ? (
-          <span className="text-xs font-semibold text-foreground">
-            R$ {lead.valorProposta.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
-          </span>
-        ) : null}
+              <div className="flex-1 space-y-3 overflow-y-auto max-h-[600px] pr-1">
+                {filteredLeads.map(lead => (
+                  <div key={lead.id} className={`p-4 rounded-xl border transition-all ${
+                    theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200 shadow-sm'
+                  }`}>
+                    <div className="font-bold text-sm truncate">{lead.name}</div>
+                    <div className="text-xs text-indigo-500 font-semibold mb-2 truncate">{lead.company}</div>
+                    {lead.email && <div className="text-[11px] text-slate-400 truncate mb-1">✉️ {lead.email}</div>}
+                    {lead.notes && (
+                      <div className={`mt-2 pt-2 border-t text-[10px] line-clamp-2 leading-relaxed ${
+                        theme === 'dark' ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-600'
+                      }`}>
+                        {lead.notes}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {filteredLeads.length === 0 && (
+                  <div className="text-center text-xs text-slate-600 py-12 border-2 border-dashed border-slate-800/10 rounded-xl my-auto">
+                    Nenhum lead nesta etapa
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
