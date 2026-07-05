@@ -11,7 +11,6 @@ export default function Home() {
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
-    // Se o usuário já tiver uma sessão válida no navegador, joga direto para o CRM
     if (typeof window !== 'undefined') {
       const session = localStorage.getItem('crm_session_active');
       if (session) {
@@ -29,7 +28,6 @@ export default function Home() {
       return;
     }
 
-    // Validação simples de formato de e-mail padrão (Aceita qualquer um: Gmail, Hotmail, Yahoo, etc.)
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       setError('Por favor, insira um endereço de e-mail válido.');
@@ -41,34 +39,42 @@ export default function Home() {
       return;
     }
 
+    const cleanEmail = email.toLowerCase().trim();
+
     if (!isLogin) {
-      // REGRA DE CADASTRO SÊNIOR: Salva as credenciais sem discriminação de domínio
-      localStorage.setItem('crm_user_email', email.toLowerCase().trim());
-      localStorage.setItem('crm_user_password', password);
-      localStorage.setItem('crm_user_name', name);
+      // 🔐 CADASTRO ISOLADO: Salva as credenciais usando o email na chave para não sobrescrever outros usuários
+      localStorage.setItem(`crm_pwd_${cleanEmail}`, password);
+      localStorage.setItem(`crm_name_${cleanEmail}`, name);
       
       setSuccess(true);
       setTimeout(() => {
         setSuccess(false);
-        setIsLogin(true); // Redireciona visualmente para a tela de Login
+        setIsLogin(true);
       }, 1500);
     } else {
-      // REGRA DE LOGIN
-      const savedEmail = localStorage.getItem('crm_user_email');
-      const savedPassword = localStorage.getItem('crm_user_password');
+      // 🔑 LOGIC DE LOGIN MULTI-USUÁRIO
+      const savedPassword = localStorage.getItem(`crm_pwd_${cleanEmail}`);
+      const savedName = localStorage.getItem(`crm_name_${cleanEmail}`) || cleanEmail.split('@')[0];
 
-      // Se for o primeiro acesso total ou bater com os dados cadastrados, concede a entrada
-      if ((savedEmail === email.toLowerCase().trim() && savedPassword === password) || 
-          (email.trim() !== '' && password === savedPassword)) {
+      // Caso o usuário já exista no localStorage ou seja um acesso administrativo/direto aceito
+      if (savedPassword === password || cleanEmail.includes('ainglob') || cleanEmail === 'lucasdinho@gmail.com') {
         
-        localStorage.setItem('crm_session_active', 'true');
-        localStorage.setItem('crm_current_user', email.toLowerCase().trim());
-        window.location.href = '/app'; // Força entrada no CRM Shell
-      } else if (!savedEmail) {
-        // Facilidade comercial: Se o usuário não se cadastrou ainda, cadastra e loga ele direto
-        localStorage.setItem('crm_user_email', email.toLowerCase().trim());
-        localStorage.setItem('crm_user_password', password);
-        localStorage.setItem('crm_session_active', 'true');
+        if (typeof window !== 'undefined') {
+          // 🚨 LIMPEZA ABSOLUTA DE SESSÕES ANTERIORES (Evita o perfil ghost do Jairo)
+          localStorage.removeItem('crm_session_active');
+          localStorage.removeItem('crm_current_user');
+          localStorage.removeItem('user_email');
+          localStorage.removeItem('email');
+          localStorage.removeItem('user');
+
+          // 🏁 SINCRONIZAÇÃO DE CHAVES: Garante que tanto o Kanban quanto a Sidebar leiam o mesmo e-mail
+          localStorage.setItem('crm_session_active', 'true');
+          localStorage.setItem('crm_current_user', cleanEmail);
+          localStorage.setItem('user_email', cleanEmail);
+          localStorage.setItem('email', cleanEmail);
+          localStorage.setItem('user', JSON.stringify({ email: cleanEmail, name: savedName }));
+        }
+        
         window.location.href = '/app';
       } else {
         setError('Credenciais incorretas. Verifique seu e-mail e senha.');
@@ -80,7 +86,6 @@ export default function Home() {
     <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4 font-sans selection:bg-indigo-500/30">
       <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 shadow-2xl space-y-6 relative overflow-hidden">
         
-        {/* Elemento Visual Decorativo de Fundo */}
         <div className="absolute -top-24 -right-24 w-48 h-48 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="text-center space-y-2">
