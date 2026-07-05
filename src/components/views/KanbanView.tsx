@@ -1,20 +1,27 @@
 'use client';
 import React, { useRef, useState } from 'react';
 import { useCRMStore, type Stage } from '@/src/store/crmStore';
-import { FileSpreadsheet } from 'lucide-react';
+import { FileSpreadsheet, Trash2, GripVertical } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
-export default function KanbanView() {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const { leads, addLead, theme } = useCRMStore();
-  const [isProcessing, setIsProcessing] = useState(false);
+interface KanbanViewProps {
+  onOpenLead: (id: string) => void;
+  onAddLead: () => void;
+  onEditLead: (id: string) => void;
+}
 
-  // Interpretador Inteligente para ler a planilha Excel
+export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: KanbanViewProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { leads, addLead, updateLeadStage, deleteLead, theme } = useCRMStore();
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
+  const [dragOverColumn, setDragOverColumn] = useState<Stage | null>(null);
+
   const mapRowToLead = (row: any) => {
     const keys = Object.keys(row);
-    
+
     const findValue = (possibleNames: string[]) => {
-      const foundKey = keys.find(k => 
+      const foundKey = keys.find(k =>
         possibleNames.some(name => k.toLowerCase().trim().replace(/[^a-z0-9]/g, '') === name)
       );
       return foundKey ? String(row[foundKey]).trim() : '';
@@ -27,13 +34,6 @@ export default function KanbanView() {
     const linkedin = findValue(['linkedin', 'url', 'perfil']);
     const phone = findValue(['telefone', 'celular', 'fixo', 'whatsapp', 'phone', 'mobile']);
     const cnpj = findValue(['cnpj', 'cadastro', 'documento']).replace(/[^0-9]/g, '');
-
-    const notes = [
-      role ? `Cargo: ${role}` : '',
-      linkedin ? `LinkedIn: ${linkedin}` : '',
-      cnpj ? `CNPJ: ${cnpj}` : '',
-      phone ? `Tel: ${phone}` : ''
-    ].filter(Boolean).join(' | ');
 
     return {
       nome: name || 'Lead Sem Nome',
@@ -96,6 +96,42 @@ export default function KanbanView() {
     reader.readAsBinaryString(file);
   };
 
+  const handleDragStart = (e: React.DragEvent, leadId: string) => {
+    setDraggedLeadId(leadId);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', leadId);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedLeadId(null);
+    setDragOverColumn(null);
+  };
+
+  const handleDragOver = (e: React.DragEvent, columnId: Stage) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverColumn !== columnId) {
+      setDragOverColumn(columnId);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent, columnId: Stage) => {
+    e.preventDefault();
+    if (dragOverColumn === columnId) {
+      setDragOverColumn(null);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent, columnId: Stage) => {
+    e.preventDefault();
+    const leadId = e.dataTransfer.getData('text/plain') || draggedLeadId;
+    if (leadId) {
+      updateLeadStage(leadId, columnId);
+    }
+    setDraggedLeadId(null);
+    setDragOverColumn(null);
+  };
+
   const columns: { title: string; id: Stage; color: string }[] = [
     { title: 'Entrada', id: 'entrada', color: 'bg-indigo-500/10 border-indigo-500/30 text-indigo-400' },
     { title: 'Enriquecer', id: 'enriquecer', color: 'bg-amber-500/10 border-amber-500/30 text-amber-400' },
@@ -108,7 +144,7 @@ export default function KanbanView() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-800 pb-5">
         <div>
           <h1 className="text-2xl font-black tracking-tight">Pipeline de Vendas B2B</h1>
-          <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>Gerencie seus leads comerciais em tempo real.</p>
+          <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>Arraste os cards entre as etapas ou clique para abrir o detalhe do lead.</p>
         </div>
 
         <div>
@@ -124,13 +160,24 @@ export default function KanbanView() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {columns.map(column => {
           const filteredLeads = leads.filter(l => l.stage === column.id);
+          const isDragOver = dragOverColumn === column.id;
           return (
-            <div key={column.id} className={`p-4 rounded-2xl border min-h-[500px] flex flex-col ${
-              theme === 'dark' ? 'bg-slate-900/40 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
-            }`}>
+            <div
+              key={column.id}
+              onDragOver={(e) => handleDragOver(e, column.id)}
+              onDragLeave={(e) => handleDragLeave(e, column.id)}
+              onDrop={(e) => handleDrop(e, column.id)}
+              className={`p-4 rounded-2xl border min-h-[500px] flex flex-col transition-colors ${
+                isDragOver
+                  ? 'border-indigo-500 bg-indigo-500/5'
+                  : theme === 'dark'
+                    ? 'bg-slate-900/40 border-slate-800'
+                    : 'bg-white border-slate-200 shadow-sm'
+              }`}
+            >
               <div className={`p-2.5 rounded-xl border text-xs font-black mb-4 uppercase tracking-wider flex justify-between items-center ${column.color}`}>
                 <span>{column.title}</span>
                 <span className="px-2 py-0.5 rounded-md bg-black/20 text-[10px]">{filteredLeads.length}</span>
@@ -138,14 +185,50 @@ export default function KanbanView() {
 
               <div className="flex-1 space-y-3 overflow-y-auto max-h-[600px] pr-1">
                 {filteredLeads.map(lead => (
-                  <div key={lead.id} className={`p-4 rounded-xl border transition-all ${
-                    theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200 shadow-sm'
-                  }`}>
-                    <div className="font-bold text-sm truncate">{lead.nome}</div>
-                    <div className="text-xs text-indigo-500 font-semibold mb-2 truncate">{lead.nomeEmpresa}</div>
-                    {lead.emailCorporativo && <div className="text-[11px] text-slate-400 truncate mb-1">✉️ {lead.emailCorporativo}</div>}
+                  <div
+                    key={lead.id}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, lead.id)}
+                    onDragEnd={handleDragEnd}
+                    onClick={() => onOpenLead(lead.id)}
+                    className={`group p-4 rounded-xl border transition-all cursor-pointer ${
+                      draggedLeadId === lead.id
+                        ? 'opacity-40 border-dashed border-indigo-500'
+                        : theme === 'dark'
+                          ? 'bg-slate-900 border-slate-800 hover:border-indigo-500/50 hover:shadow-lg hover:shadow-indigo-500/10'
+                          : 'bg-slate-50 border-slate-200 shadow-sm hover:border-indigo-500/50 hover:shadow-md'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                        <GripVertical className={`w-3.5 h-3.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity ${
+                          theme === 'dark' ? 'text-slate-600' : 'text-slate-400'
+                        }`} />
+                        <div className="font-bold text-sm truncate">{lead.nome}</div>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm(`Excluir o lead "${lead.nome}"?`)) {
+                            deleteLead(lead.id);
+                          }
+                        }}
+                        className={`p-1 rounded-md opacity-0 group-hover:opacity-100 transition-all flex-shrink-0 ${
+                          theme === 'dark'
+                            ? 'text-slate-600 hover:text-rose-400 hover:bg-rose-500/10'
+                            : 'text-slate-400 hover:text-rose-500 hover:bg-rose-500/10'
+                        }`}
+                        title="Excluir lead"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <div className="text-xs text-indigo-500 font-semibold mb-2 truncate pl-5">{lead.nomeEmpresa}</div>
+                    {lead.emailCorporativo && (
+                      <div className="text-[11px] text-slate-400 truncate mb-1 pl-5">✉️ {lead.emailCorporativo}</div>
+                    )}
                     {lead.cargo && (
-                      <div className={`mt-2 pt-2 border-t text-[10px] line-clamp-2 leading-relaxed ${
+                      <div className={`mt-2 pt-2 border-t text-[10px] line-clamp-2 leading-relaxed pl-5 ${
                         theme === 'dark' ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-600'
                       }`}>
                         {lead.cargo}

@@ -114,7 +114,13 @@ export default function AppPage() {
               onViewKanban={handleViewKanban}
             />
           )}
-          {activeView === 'kanban' && <KanbanView />}
+          {activeView === 'kanban' && (
+            <KanbanView
+              onOpenLead={handleOpenLead}
+              onAddLead={handleAddLead}
+              onEditLead={handleEditLead}
+            />
+          )}
           {activeView === 'leads' && (
             <LeadsView
               onOpenLead={handleOpenLead}
