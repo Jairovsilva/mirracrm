@@ -13,6 +13,7 @@ import { SettingsView } from '@/src/components/views/SettingsView';
 import { LeadDetailDrawer } from '@/src/components/leads/LeadDetailDrawer';
 import { LeadFormModal } from '@/src/components/leads/LeadFormModal';
 import { AlertsPanel } from '@/src/components/alerts/AlertsPanel';
+import { AIAssistant } from '@/src/components/AIAssistant';
 
 export type ViewType = 'dashboard' | 'kanban' | 'leads' | 'analytics' | 'team' | 'settings';
 
@@ -150,6 +151,8 @@ export default function AppPage() {
           }}
         />
       )}
+
+      <AIAssistant />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 import React, { useRef, useState } from 'react';
 import { useCRMStore, type Stage } from '@/src/store/crmStore';
-import { FileSpreadsheet, Trash2, GripVertical } from 'lucide-react';
+import { FileSpreadsheet, Trash2, GripVertical, Search, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 interface KanbanViewProps {
@@ -16,6 +16,7 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
   const [isProcessing, setIsProcessing] = useState(false);
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<Stage | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const mapRowToLead = (row: any) => {
     const keys = Object.keys(row);
@@ -141,28 +142,65 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-800 pb-5">
-        <div>
-          <h1 className="text-2xl font-black tracking-tight">Pipeline de Vendas B2B</h1>
-          <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>Arraste os cards entre as etapas ou clique para abrir o detalhe do lead.</p>
+      <div className="space-y-4 border-b border-slate-800 pb-5">
+        <div className="flex flex-row justify-between items-center gap-4">
+          <div>
+            <h1 className="text-2xl font-black tracking-tight">Pipeline de Vendas B2B</h1>
+            <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>Arraste os cards entre as etapas ou clique para abrir o detalhe do lead.</p>
+          </div>
+
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".xlsx, .xls" className="hidden" />
+            <button
+              type="button"
+              disabled={isProcessing}
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-lg transition-all disabled:opacity-50 whitespace-nowrap"
+            >
+              {isProcessing ? 'Mapeando...' : <> <FileSpreadsheet className="w-4 h-4" /> Importar Excel </>}
+            </button>
+          </div>
         </div>
 
-        <div>
-          <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".xlsx, .xls" className="hidden" />
-          <button
-            type="button"
-            disabled={isProcessing}
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-3 px-4 rounded-xl shadow-lg transition-all disabled:opacity-50"
-          >
-            {isProcessing ? 'Mapeando Linhas...' : <> <FileSpreadsheet className="w-4 h-4" /> Importar Lista Excel </>}
-          </button>
+        <div className="relative">
+          <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`} />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Buscar lead por nome, empresa, email ou cargo..."
+            className={`w-full text-sm rounded-xl pl-10 pr-10 py-2.5 outline-none border transition-colors ${
+              theme === 'dark'
+                ? 'bg-slate-900 border-slate-700 text-slate-100 placeholder-slate-500 focus:border-indigo-500'
+                : 'bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400 focus:border-indigo-400'
+            }`}
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className={`absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-md transition-colors ${
+                theme === 'dark' ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {columns.map(column => {
-          const filteredLeads = leads.filter(l => l.stage === column.id);
+          const filteredLeads = leads.filter(l => {
+            if (l.stage !== column.id) return false;
+            if (!searchQuery.trim()) return true;
+            const q = searchQuery.toLowerCase().trim();
+            return (
+              l.nome.toLowerCase().includes(q) ||
+              l.nomeEmpresa.toLowerCase().includes(q) ||
+              l.emailCorporativo.toLowerCase().includes(q) ||
+              l.cargo.toLowerCase().includes(q)
+            );
+          });
           const isDragOver = dragOverColumn === column.id;
           return (
             <div
