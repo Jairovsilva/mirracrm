@@ -1,5 +1,6 @@
 'use client';
 
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from '@/src/lib/useTranslation';
 import { useCRMStore } from '@/src/store/crmStore';
 import { LayoutDashboard, KanbanSquare, Users, BarChart3, UserCog, Settings, LogOut } from 'lucide-react';
@@ -14,7 +15,28 @@ interface SidebarProps {
 
 export function Sidebar({ activeView, onViewChange }: SidebarProps) {
   const { t } = useTranslation();
-  const currentUser = useCRMStore((s) => s.currentUser);
+  const storeCurrentUser = useCRMStore((s) => s.currentUser);
+  
+  // Estado local para garantir sincronismo em tempo real com o localStorage
+  const [displayUser, setDisplayUser] = useState({
+    email: storeCurrentUser?.email || 'jairo@ainglobal.com.br',
+    empresa: storeCurrentUser?.empresa || 'AINGLOBAL',
+    role: storeCurrentUser?.role || 'admin_principal'
+  });
+
+  // 🔄 Efeito cirúrgico para capturar o usuário real logado no localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const activeUserEmail = localStorage.getItem('crm_current_user');
+      if (activeUserEmail) {
+        setDisplayUser({
+          email: activeUserEmail,
+          empresa: activeUserEmail.includes('ainglob') ? 'AINGLOBAL' : 'Workspace Pessoal',
+          role: activeUserEmail.includes('ainglob') ? 'admin_principal' : 'usuário'
+        });
+      }
+    }
+  }, [storeCurrentUser]);
 
   const navItems = [
     { id: 'dashboard' as ViewType, label: t.nav.dashboard, icon: LayoutDashboard },
@@ -26,10 +48,11 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
   ];
 
   const handleLogout = () => {
-    if (typeof window !== 'undefined' && typeof window.logout === 'function') {
-      window.logout();
-    } else {
+    if (typeof window !== 'undefined') {
       localStorage.removeItem('crm_session_active');
+      localStorage.removeItem('crm_current_user');
+      localStorage.removeItem('user_email');
+      localStorage.removeItem('email');
       window.location.href = '/';
     }
   };
@@ -47,7 +70,7 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
         />
         <div>
           <h1 className="font-bold text-sm text-sidebar-foreground">{t.appName}</h1>
-          <p className="text-xs text-muted-foreground">{currentUser?.empresa}</p>
+          <p className="text-xs text-muted-foreground">{displayUser.empresa}</p>
         </div>
       </div>
 
@@ -78,11 +101,11 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
       <div className="p-4 border-t border-sidebar-border">
         <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-secondary/50">
           <div className="w-9 h-9 rounded-full bg-primary/15 flex items-center justify-center text-primary font-semibold text-sm">
-            {currentUser?.email?.[0]?.toUpperCase() || 'U'}
+            {displayUser.email?.[0]?.toUpperCase() || 'U'}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-foreground truncate">{currentUser?.email}</p>
-            <p className="text-xs text-muted-foreground capitalize">{currentUser?.role.replace('_', ' ')}</p>
+            <p className="text-sm font-medium text-foreground truncate">{displayUser.email}</p>
+            <p className="text-xs text-muted-foreground capitalize">{displayUser.role.replace('_', ' ')}</p>
           </div>
           <button
             onClick={handleLogout}
