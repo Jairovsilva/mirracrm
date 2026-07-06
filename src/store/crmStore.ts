@@ -72,6 +72,11 @@ interface CRMState {
   logout: () => void;
 
   clearStorage: () => void;
+
+  // 🚀 ADICIONADO: Métodos para controle e monitoramento de equipe pontuais
+  registerVendedor: (email: string, nomeVendedor: string) => { success: boolean; message: string };
+  getCompanyUsers: () => User[];
+  getCompanyLeads: () => Lead[];
 }
 
 const seedLeads = (): Lead[] => {
@@ -222,6 +227,59 @@ export const useCRMStore = create<CRMState>()(
       },
 
       clearStorage: () => set({ leads: [], alerts: [] }),
+
+      // 🚀 IMPLEMENTAÇÃO: Métodos Corporativos Multi-Usuário Avançados
+      registerVendedor: (email, nomeVendedor) => {
+        const state = get();
+        const admin = state.currentUser;
+        if (!admin || admin.role !== 'admin_principal') {
+          return { success: false, message: 'Apenas Administradores Principais podem criar vendedores.' };
+        }
+
+        const existing = state.registeredUsers.find((u) => u.email === email);
+        if (existing) return { success: false, message: 'Este e-mail de vendedor já está registrado.' };
+
+        const newVendedor: User = {
+          id: Math.random().toString(36).substring(2, 9),
+          email,
+          role: 'vendedor',
+          empresa: admin.empresa, // Vincula à mesma empresa do criador para controle de visão
+        };
+
+        set({ registeredUsers: [...state.registeredUsers, newVendedor] });
+        
+        // Simula criação de credencial no seu ecossistema localStorage
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(`crm_pwd_${email.toLowerCase().trim()}`, '123456'); // Senha inicial padrão corporativa
+          localStorage.setItem(`crm_name_${email.toLowerCase().trim()}`, nomeVendedor);
+        }
+
+        return { success: true, message: `Vendedor ${nomeVendedor} adicionado com sucesso à empresa ${admin.empresa}!` };
+      },
+
+      getCompanyUsers: () => {
+        const state = get();
+        if (!state.currentUser) return [];
+        // Filtra todos os membros cadastrados pertencentes à mesma empresa
+        return state.registeredUsers.filter((u) => u.empresa === state.currentUser?.empresa);
+      },
+
+      getCompanyLeads: () => {
+        const state = get();
+        const user = state.currentUser;
+        if (!user) return [];
+
+        // Regra de Observador Sênior: Admin vê tudo da empresa, vendedor vê apenas os criados por seu ID único
+        if (user.role === 'admin_principal') {
+          const companyUserIds = state.registeredUsers
+            .filter((u) => u.empresa === user.empresa)
+            .map((u) => u.id);
+          
+          return state.leads.filter((l) => companyUserIds.includes(l.userId) || l.userId === user.id || l.userId === 'system');
+        }
+
+        return state.leads.filter((l) => l.userId === user.id);
+      }
     }),
     {
       name: 'corca_crm_storage',
