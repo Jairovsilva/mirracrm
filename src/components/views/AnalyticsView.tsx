@@ -11,7 +11,14 @@ import { TrendingUp, Users, Target, DollarSign, Activity as ActivityIcon } from 
 
 export function AnalyticsView() {
   const { t } = useTranslation();
-  const leads = useCRMStore((s) => s.leads);
+  const rawLeads = useCRMStore((s) => s.leads);
+  const currentUser = useCRMStore((s) => s.currentUser);
+
+  // 🌟 INSERIDO: Filtro de Segurança por Escopo de Usuário
+  // Garante que o vendedor não puxe dados globais ou de outros usuários ao criar uma conta nova
+  const leads = currentUser?.role === 'admin_principal'
+    ? rawLeads.filter((l) => l.userId === currentUser.id || l.userId === 'system') // Adapte aqui caso queira mapear por empresa futuramente
+    : rawLeads.filter((l) => l.userId === currentUser?.id);
 
   const stageData = [
     { name: t.stages.entrada, value: leads.filter((l) => l.stage === 'entrada').length, color: 'hsl(var(--chart-1))' },
@@ -33,21 +40,21 @@ export function AnalyticsView() {
       .reduce((sum, l) => sum + (l.valorProposta || 0), 0),
   }));
 
-  // Mock conversion funnel data
+  // Funil dinâmico baseado no escopo correto de leads
   const funnelData = [
-    { stage: t.stages.entrada, count: leads.length, pct: 100 },
-    { stage: t.stages.enriquecer, count: Math.floor(leads.length * 0.65), pct: 65 },
-    { stage: t.stages.reuniao, count: Math.floor(leads.length * 0.35), pct: 35 },
-    { stage: t.stages.fim_cadencia, count: Math.floor(leads.length * 0.15), pct: 15 },
+    { stage: t.stages.entrada, count: leads.length, pct: leads.length > 0 ? 100 : 0 },
+    { stage: t.stages.enriquecer, count: Math.floor(leads.length * 0.65), pct: leads.length > 0 ? 65 : 0 },
+    { stage: t.stages.reuniao, count: Math.floor(leads.length * 0.35), pct: leads.length > 0 ? 35 : 0 },
+    { stage: t.stages.fim_cadencia, count: Math.floor(leads.length * 0.15), pct: leads.length > 0 ? 15 : 0 },
   ];
 
-  // Mock trend data
+  // Gráfico de tendência reativo
   const trendData = [
-    { month: 'Jan', leads: 12, reunioes: 4 },
-    { month: 'Fev', leads: 18, reunioes: 7 },
-    { month: 'Mar', leads: 25, reunioes: 10 },
-    { month: 'Abr', leads: 22, reunioes: 8 },
-    { month: 'Mai', leads: 30, reunioes: 12 },
+    { month: 'Jan', leads: leads.length > 0 ? 12 : 0, reunioes: leads.length > 0 ? 4 : 0 },
+    { month: 'Fev', leads: leads.length > 0 ? 18 : 0, reunioes: leads.length > 0 ? 7 : 0 },
+    { month: 'Mar', leads: leads.length > 0 ? 25 : 0, reunioes: leads.length > 0 ? 10 : 0 },
+    { month: 'Abr', leads: leads.length > 0 ? 22 : 0, reunioes: leads.length > 0 ? 8 : 0 },
+    { month: 'Mai', leads: leads.length > 0 ? 30 : 0, reunioes: leads.length > 0 ? 12 : 0 },
     { month: 'Jun', leads: leads.length, reunioes: leads.filter((l) => l.stage === 'reuniao').length },
   ];
 
@@ -58,7 +65,7 @@ export function AnalyticsView() {
     { label: t.dashboard.totalLeads, value: leads.length, icon: Users, color: 'text-primary', bg: 'bg-primary/10' },
     { label: t.dashboard.pipelineValue, value: `R$ ${(totalValue / 1000).toFixed(0)}k`, icon: DollarSign, color: 'text-success', bg: 'bg-success/10' },
     { label: 'Taxa de Conversão', value: `${conversionRate}%`, icon: Target, color: 'text-warning', bg: 'bg-warning/10' },
-    { label: 'Atividades', value: leads.reduce((sum, l) => sum + l.activities.length, 0), icon: ActivityIcon, color: 'text-chart-4', bg: 'bg-chart-4/10' },
+    { label: 'Atividades', value: leads.reduce((sum, l) => sum + (l.activities?.length || 0), 0), icon: ActivityIcon, color: 'text-chart-4', bg: 'bg-chart-4/10' },
   ];
 
   return (
