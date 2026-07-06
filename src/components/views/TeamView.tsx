@@ -10,8 +10,8 @@ export function TeamView() {
   const { t } = useTranslation();
   const registeredUsers = useCRMStore((s) => s.registeredUsers);
   const currentUser = useCRMStore((s) => s.currentUser);
-  const leads = useCRMStore((s) => s.leads);
   const registerVendedor = useCRMStore((s) => s.registerVendedor);
+  const getCompanyLeads = useCRMStore((s) => s.getCompanyLeads);
 
   // Estados locais para o formulário de cadastro
   const [nomeVendedor, setNomeVendedor] = useState('');
@@ -34,7 +34,6 @@ export function TeamView() {
       return;
     }
 
-    // Invoca o método que adicionamos na store
     const result = registerVendedor(emailVendedor.trim().toLowerCase(), nomeVendedor);
 
     if (result.success) {
@@ -64,7 +63,7 @@ export function TeamView() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* INTERFACE INSERIDA: Formulário Lateral de Cadastro (Apenas visível e usável pelo Admin Principal) */}
+        {/* Formulário Lateral de Cadastro */}
         <div className="space-y-4">
           <Card className="border border-border/80">
             <CardContent className="p-5 space-y-4">
@@ -129,7 +128,7 @@ export function TeamView() {
           </Card>
         </div>
 
-        {/* LISTAGEM APERFEIÇOADA: Grid Dinâmica dos Usuários Reais da Organização */}
+        {/* Listagem de Usuários Organizados e Isolados */}
         <div className="lg:col-span-2">
           {companyUsers.length === 0 ? (
             <Card>
@@ -141,13 +140,14 @@ export function TeamView() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {companyUsers.map((user) => {
-                // Se for o admin, ele observa todos os leads do banco. Se for vendedor, apenas o dele.
                 const isUserAdmin = user.role === 'admin_principal';
+                
+                // 🔒 CORREÇÃO DA VISÃO DO ADMIN: Puxa o escopo isolado real da empresa em vez de ler o array bruto global
+                const companyLeads = getCompanyLeads();
                 const userLeads = isUserAdmin 
-                  ? leads 
-                  : leads.filter((l) => l.userId === user.id);
+                  ? companyLeads 
+                  : companyLeads.filter((l) => l.userId === user.id);
 
-                // Busca o nome real salvo no localStorage se houver, senão usa o prefixo do e-mail
                 const storedName = typeof window !== 'undefined' ? localStorage.getItem(`crm_name_${user.email}`) : null;
                 const displayName = storedName || user.email.split('@')[0];
 
@@ -156,7 +156,6 @@ export function TeamView() {
                     <CardContent className="p-5 flex flex-col justify-between h-full space-y-4">
                       
                       <div className="flex items-start gap-3">
-                        {/* Avatar */}
                         <div className={`w-11 h-11 rounded-full flex items-center justify-center font-bold text-base shrink-0 ${
                           isUserAdmin ? 'bg-amber-500/10 text-amber-500' : 'bg-primary/10 text-primary'
                         }`}>
@@ -189,12 +188,11 @@ export function TeamView() {
                         </div>
                       </div>
 
-                      {/* Indicadores Dinâmicos de Desempenho */}
                       <div className="mt-auto pt-3 border-t border-border flex items-center justify-between text-xs">
                         <div>
                           <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-tight">Escopo de Leads</p>
                           <p className="font-bold text-sm text-foreground mt-0.5">
-                            {isUserAdmin ? `${userLeads.length} (Global)` : userLeads.length}
+                            {isUserAdmin ? `${userLeads.length} (Empresa)` : userLeads.length}
                           </p>
                         </div>
                         <div className="text-right">
