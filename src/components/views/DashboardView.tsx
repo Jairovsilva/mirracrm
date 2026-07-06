@@ -1,5 +1,6 @@
 'use client';
 
+import React, { useState, useEffect } from 'react';
 import { useTranslation } from '@/src/lib/useTranslation';
 import { useCRMStore } from '@/src/store/crmStore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,15 +21,24 @@ interface DashboardViewProps {
 export function DashboardView({ onOpenLead, onAddLead, onViewKanban }: DashboardViewProps) {
   const { t } = useTranslation();
   const leads = useCRMStore((s) => s.leads);
-  const currentUser = useCRMStore((s) => s.currentUser);
+  
+  // 🔄 Estado local para garantir sincronia real com o usuário do LocalStorage
+  const [activeEmail, setActiveEmail] = useState('');
 
-  // 🔒 ISOLAMENTO DE DADOS: Filtra para que o usuário veja apenas os SEUS próprios leads
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const storedUser = localStorage.getItem('crm_current_user') || '';
+      setActiveEmail(storedUser);
+    }
+  }, []);
+
+  // 🔒 ISOLAMENTO REAL: Filtra os leads pelo email verificado no LocalStorage
   const myLeads = leads.filter((l) => {
     const owner = (l as any).userOwner;
-    return owner === currentUser?.email;
+    return owner === activeEmail;
   });
 
-  // 📊 Todas as métricas agora utilizam exclusivamente 'myLeads' ao invés da store global
+  // 📊 Métricas baseadas unicamente no usuário logado
   const totalLeads = myLeads.length;
   const hotLeads = myLeads.filter((l) => l.temperatura === 'quente').length;
   const meetingsScheduled = myLeads.filter((l) => l.stage === 'reuniao').length;
@@ -95,11 +105,11 @@ export function DashboardView({ onOpenLead, onAddLead, onViewKanban }: Dashboard
 
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-[1600px] mx-auto animate-fade-in">
-      {/* Welcome header */}
+      {/* Welcome header corrigido com o activeEmail real */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">
-            {t.dashboard.welcome}, {currentUser?.email?.split('@')[0] || 'User'}
+            {t.dashboard.welcome}, {activeEmail ? activeEmail.split('@')[0] : 'Usuário'}
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
             {new Date().toLocaleDateString(currentLanguageDate(), { weekday: 'long', day: 'numeric', month: 'long' })}
