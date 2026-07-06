@@ -181,20 +181,24 @@ export const useCRMStore = create<CRMState>()(
 
       setLanguage: (lang) => set({ currentLanguage: lang }),
 
+      // 🛠️ ATUALIZADO: Login limpa resíduos de e-mails antigos e normaliza strings
       login: (email, _password) => {
         const state = get();
-        const user = state.registeredUsers.find((u) => u.email.toLowerCase().trim() === email.toLowerCase().trim());
+        const cleanEmail = email.toLowerCase().trim();
+        const user = state.registeredUsers.find((u) => u.email.toLowerCase().trim() === cleanEmail);
+        
         if (user) {
-          set({ currentUser: user });
           if (typeof window !== 'undefined') {
             localStorage.setItem('crm_current_user', user.email);
             localStorage.setItem('crm_session_active', 'true');
           }
+          set({ currentUser: user });
           return true;
         }
         return false;
       },
 
+      // 🛠️ ATUALIZADO: Registro agora isola completamente a nova sessão
       register: (email, _password) => {
         const state = get();
         const cleanEmail = email.toLowerCase().trim();
@@ -210,27 +214,28 @@ export const useCRMStore = create<CRMState>()(
           empresa: company,
         };
         
-        set({
-          registeredUsers: [...state.registeredUsers, newUser],
-          currentUser: newUser,
-        });
-
         if (typeof window !== 'undefined') {
           localStorage.setItem('crm_current_user', newUser.email);
           localStorage.setItem('crm_session_active', 'true');
         }
+
+        set({
+          registeredUsers: [...state.registeredUsers, newUser],
+          currentUser: newUser,
+        });
         return true;
       },
 
-      // 🛠️ CORREÇÃO DO LOGOUT RESIDUAL
+      // 🛠️ ATUALIZADO: Logout limpa totalmente chaves manuais e força reset de memória
       logout: () => {
-        set({ currentUser: null });
         if (typeof window !== 'undefined') {
           localStorage.removeItem('crm_current_user');
           localStorage.removeItem('crm_session_active');
-          // Força a limpeza completa do cache local temporário para desvincular contas antigas
           localStorage.removeItem('corca_crm_storage');
-          window.location.reload(); 
+        }
+        set({ currentUser: null });
+        if (typeof window !== 'undefined') {
+          window.location.reload();
         }
       },
 
@@ -270,24 +275,27 @@ export const useCRMStore = create<CRMState>()(
         return state.registeredUsers.filter((u) => u.empresa === state.currentUser?.empresa);
       },
 
-      // 🛠️ CORREÇÃO DE ESCOPO CORPORATIVO:
+      // 🛠️ FIX DEFINITIVO: Regra estrita baseada na tabela e nos prints anexados
       getCompanyLeads: () => {
         const state = get();
         const user = state.currentUser;
         if (!user) return [];
 
-        // Se o usuário for um vendedor comum, ele só tem acesso aos dados criados por ele
-        if (user.role === 'vendedor') {
+        // Filtra os usuários que pertencem à mesma empresa do usuário logado
+        const companyUserIds = state.registeredUsers
+          .filter((u) => u.empresa === user.empresa)
+          .map((u) => u.id);
+
+        // Se for um vendedor comum ou um usuário recém-criado:
+        if (user.role === 'vendedor' || user.role === 'usuario' || user.role === 'User') {
           return state.leads.filter((l) => l.userId === user.id);
         }
 
-        // Se for o Admin Principal, ele vê os leads cadastrados pelos vendedores da empresa dele e os do sistema padrão
+        // Se for Admin Principal, ele vê os leads gerados pela equipe da empresa dele
         if (user.role === 'admin_principal') {
-          const companyUserIds = state.registeredUsers
-            .filter((u) => u.empresa === user.empresa)
-            .map((u) => u.id);
-          
-          return state.leads.filter((l) => companyUserIds.includes(l.userId) || l.userId === user.id || l.userId === 'system');
+          return state.leads.filter((l) => 
+            (companyUserIds.includes(l.userId) || l.userId === user.id) && l.userId !== 'system'
+          );
         }
 
         return [];
