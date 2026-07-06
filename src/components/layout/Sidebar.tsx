@@ -17,22 +17,31 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
   const { t } = useTranslation();
   const storeCurrentUser = useCRMStore((s) => s.currentUser);
   
-  // Estado local para garantir sincronismo em tempo real com o localStorage
+  // 🛠️ CORREÇÃO: Estado inicial dinâmico e limpo para evitar carregar dados antigos na marra
   const [displayUser, setDisplayUser] = useState({
-    email: storeCurrentUser?.email || 'jairo@ainglobal.com.br',
-    empresa: storeCurrentUser?.empresa || 'AINGLOBAL',
-    role: storeCurrentUser?.role || 'admin_principal'
+    email: storeCurrentUser?.email || '',
+    empresa: storeCurrentUser?.empresa || 'Workspace Pessoal',
+    role: storeCurrentUser?.role || 'usuário'
   });
 
-  // 🔄 Efeito cirúrgico para capturar o usuário real logado no localStorage
+  // 🛠️ CORREÇÃO: Efeito cirúrgico ajustado para ler os dados reais da sessão sem travar no Jairo antigo
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const activeUserEmail = localStorage.getItem('crm_current_user');
-      if (activeUserEmail) {
+      
+      if (storeCurrentUser?.email) {
+        // Se o estado global do Zustand tiver o usuário, usa ele prioritariamente
+        setDisplayUser({
+          email: storeCurrentUser.email,
+          empresa: storeCurrentUser.empresa || 'Workspace Pessoal',
+          role: storeCurrentUser.role || 'usuário'
+        });
+      } else if (activeUserEmail) {
+        // Fallback seguro caso use o localStorage, isolando apenas o email exato do admin
         setDisplayUser({
           email: activeUserEmail,
-          empresa: activeUserEmail.includes('ainglob') ? 'AINGLOBAL' : 'Workspace Pessoal',
-          role: activeUserEmail.includes('ainglob') ? 'admin_principal' : 'usuário'
+          empresa: activeUserEmail === 'jairo@ainglobal.com.br' ? 'AINGLOBAL' : 'Workspace Pessoal',
+          role: activeUserEmail === 'jairo@ainglobal.com.br' ? 'admin_principal' : 'usuário'
         });
       }
     }
