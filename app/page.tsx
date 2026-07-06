@@ -122,14 +122,16 @@ export default function Home() {
       {/* 🚀 LAYOUT DE DUAS COLUNAS CONTEMPORÂNEO */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-6 grid grid-cols-1 lg:grid-cols-12 gap-12 items-center py-12">
         
-        {/* LADO ESQUERDO: Frases de Impacto Institucionais para novos Leads */}
+        {/* LADO ESQUERDO: Frases de Impacto Institucionais com o texto atualizado */}
         <div className="lg:col-span-7 space-y-6 text-left">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 text-[11px] font-semibold text-indigo-600 uppercase tracking-wider">
             <Sparkles className="w-3 h-3" /> White Label — Inteligência de Vendas B2B
           </div>
           
-          <h1 className="text-4xl sm:text-5xl md:text-6xl font-light text-neutral-950 tracking-tight leading-[1.12]">
-            O CRM para WhatsApp que <span className="font-semibold text-indigo-600">aprende a cada conversa</span>
+          <h1 className="text-4xl sm:text-5xl md:text-6xl font-light text-neutral-950 tracking-tight leading-[1.15]">
+            A Inteligência Artificial faz a análise. <br />
+            <span className="font-semibold text-indigo-600">Sua equipe toma as melhores decisões.</span> <br />
+            O resultado aparece no faturamento.
           </h1>
           
           <p className="text-lg text-neutral-500 font-normal leading-relaxed max-w-xl">
@@ -137,7 +139,7 @@ export default function Home() {
           </p>
         </div>
 
-        {/* LADO DIREITO: Card Form Baseado no estilo Helena (Claro e Arredondado) */}
+        {/* LADO DIREITO: Card Form */}
         <div className="lg:col-span-5 w-full max-w-md bg-white border border-neutral-200/70 p-8 rounded-3xl justify-self-center lg:justify-self-end shadow-xl shadow-neutral-100/60">
           
           <div className="text-left space-y-2 mb-6">
