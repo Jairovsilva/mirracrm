@@ -159,6 +159,11 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-2xl font-black tracking-tight">Pipeline de Vendas B2B</h1>
+            {currentUserEmail && (
+              <p className="text-xs text-indigo-400 font-medium mb-1">
+                Logado como: <span className="font-bold underline">{currentUserEmail}</span>
+              </p>
+            )}
             <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>Arraste os cards entre as etapas ou clique para abrir o detalhe do lead.</p>
           </div>
 
