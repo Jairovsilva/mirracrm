@@ -164,7 +164,7 @@ export default function LandingPage({ onAuthSuccess }: { onAuthSuccess: () => vo
             </button>
           </form>
 
-          {/* Seção SSO */}
+          {/* Seção SSO Mantida Intacta */}
           <div className="text-center text-[10px] text-neutral-400 dark:text-neutral-600 my-5 uppercase tracking-widest font-bold">ou use Single Sign-On</div>
           <div className="grid grid-cols-3 gap-2 text-[11px] font-medium">
             <button
