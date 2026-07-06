@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Image from 'next/image';
 import { useCRMStore } from '@/src/store/crmStore';
-import { Mail, Github, Compass, Lock, ArrowRight } from 'lucide-react';
+import { Mail, Github, Compass, Lock, ArrowRight, Target, Sparkles, Shield } from 'lucide-react';
 
 export default function LandingPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
   const login = useCRMStore((s) => s.login);
@@ -53,120 +53,45 @@ export default function LandingPage({ onAuthSuccess }: { onAuthSuccess: () => vo
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-between p-6">
-      <header className="flex justify-between items-center max-w-5xl w-full mx-auto">
+    <div className="min-h-screen bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 flex flex-col justify-between p-6 md:p-10 tracking-tight font-sans selection:bg-indigo-100">
+      
+      {/* 🧭 HEADER CLEAN */}
+      <header className="flex justify-between items-center max-w-6xl w-full mx-auto border-b border-neutral-100 dark:border-neutral-900 pb-5">
         <div className="flex items-center gap-3">
           <Image
             src="/davinci_crie_uma_logomarca_para_o_meu_crm_que_ser__chamado.png"
             alt="CorçaCRM"
-            width={40}
-            height={40}
-            className="rounded-lg"
+            width={34}
+            height={34}
+            className="rounded-xl shadow-sm"
           />
-          <span className="text-xl font-black text-slate-100 tracking-tight">
-            Corça<span className="text-indigo-400">CRM</span>
+          <span className="text-lg font-bold tracking-tight text-neutral-950 dark:text-white">
+            Corça<span className="text-indigo-600 dark:text-indigo-400 font-light">CRM</span>
           </span>
         </div>
-        <span className="text-xs text-slate-500">Inteligência Comercial B2B</span>
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-neutral-50 dark:bg-neutral-900 text-[11px] font-medium text-neutral-500 uppercase tracking-wider border border-neutral-100 dark:border-neutral-800">
+          Inteligência Comercial B2B
+        </div>
       </header>
 
-      <main className="max-w-5xl w-full mx-auto grid grid-cols-1 md:grid-cols-2 gap-12 items-center my-auto">
-        <div className="space-y-6">
-          <span className="text-xs font-bold uppercase tracking-widest text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-full border border-indigo-500/20">
-            Padrão Enterprise — Salesforce & HubSpot Style
-          </span>
-          <h2 className="text-5xl font-black mb-4 leading-tight">Mova seus negócios sem trações desnecessárias.</h2>
-          <p className="text-sm text-slate-400 max-w-sm">
-            Primeiro usuário registrado assume o papel de Administrador da Empresa, herdando permissões para auditar dashboards da equipe de vendas.
-          </p>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl max-w-sm w-full justify-self-center md:justify-self-end shadow-2xl">
-          <div className="flex border-b border-slate-800 mb-6">
-            <button
-              type="button"
-              onClick={() => { setIsLoginTab(true); setPassword(''); }}
-              className={`flex-1 pb-3 text-sm font-bold transition-all ${isLoginTab ? 'border-b-2 border-indigo-500 text-white' : 'text-slate-500 hover:text-slate-400'}`}
-            >
-              Entrar
-            </button>
-            <button
-              type="button"
-              onClick={() => { setIsLoginTab(false); setPassword(''); }}
-              className={`flex-1 pb-3 text-sm font-bold transition-all ${!isLoginTab ? 'border-b-2 border-indigo-500 text-white' : 'text-slate-500 hover:text-slate-400'}`}
-            >
-              Cadastrar
-            </button>
+      {/* 🚀 CONTEÚDO PRINCIPAL (Grid Simétrico & Espaçado) */}
+      <main className="max-w-6xl w-full mx-auto grid grid-cols-1 lg:grid-cols-12 gap-12 items-center my-auto py-12">
+        
+        {/* Lado Esquerdo: Frase de Impacto e Atração */}
+        <div className="lg:col-span-7 space-y-6 text-left">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/40 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wide">
+            <Sparkles className="w-3 h-3" /> Padrão Enterprise — Salesforce & HubSpot Style
           </div>
-
-          <h3 className="text-xl font-bold mb-2">
-            {isLoginTab ? 'Acesse sua conta' : 'Crie seu workspace'}
-          </h3>
-          <p className="text-xs text-slate-400 mb-6">
-            {isLoginTab ? 'Use suas credenciais corporativas' : 'Cadastre sua empresa usando e-mail profissional'}
+          
+          <h2 className="text-4xl sm:text-5xl md:text-6xl font-light text-neutral-950 dark:text-white leading-[1.12] tracking-tight">
+            Mova seus negócios sem <span className="font-semibold text-indigo-600 dark:text-indigo-400">trações desnecessárias.</span>
+          </h2>
+          
+          {/* ✨ FRASE DE IMPACTO MOTIVACIONAL PARA ATRAÇÃO */}
+          <p className="text-lg text-neutral-500 dark:text-neutral-400 font-normal leading-relaxed max-w-xl">
+            Transforme dados frios em relações comerciais previsíveis. O ecossistema dinâmico projetado para dar clareza ao seu funil, maximizar a produtividade do seu time e acelerar suas conversões diárias.
           </p>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="text-xs font-semibold text-slate-400">E-mail Corporativo</label>
-              <input
-                type="email"
-                required
-                placeholder="nome@suaempresa.com.br"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                className="w-full mt-1 p-3 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white focus:outline-none focus:border-indigo-500 transition"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-semibold text-slate-400">Senha</label>
-              <div className="relative mt-1">
-                <input
-                  type="password"
-                  required
-                  minLength={4}
-                  placeholder={isLoginTab ? "Digite sua senha" : "Defina uma senha segura"}
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  className="w-full p-3 pl-10 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white focus:outline-none focus:border-indigo-500 transition"
-                />
-                <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-3.5" />
-              </div>
-            </div>
-
-            <button type="submit" className="w-full py-3 bg-indigo-600 rounded-xl text-sm font-bold hover:bg-indigo-700 transition flex justify-center items-center gap-2 shadow-lg shadow-indigo-600/20">
-              {isLoginTab ? 'Entrar' : 'Concluir Cadastro'} <ArrowRight className="w-4 h-4" />
-            </button>
-          </form>
-
-          <div className="text-center text-xs text-slate-600 my-4 uppercase tracking-wider font-semibold">ou use Single Sign-On</div>
-          <div className="grid grid-cols-3 gap-2 text-xs">
-            <button
-              type="button"
-              onClick={() => handleSSOAuth('Google Cloud Identity', 'diretor@suaempresa.com.br')}
-              className="p-2 border border-slate-800 rounded-xl bg-slate-950 flex justify-center items-center gap-1 hover:bg-slate-800 transition"
-            >
-              <Mail className="w-3.5 h-3.5" /> Google
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSSOAuth('GitHub Enterprise', 'cto@empresa.org')}
-              className="p-2 border border-slate-800 rounded-xl bg-slate-950 flex justify-center items-center gap-1 hover:bg-slate-800 transition"
-            >
-              <Github className="w-3.5 h-3.5" /> GitHub
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSSOAuth('Azure AD / Microsoft', 'vp@microsoft-office.com')}
-              className="p-2 border border-slate-800 rounded-xl bg-slate-950 flex justify-center items-center gap-1 hover:bg-slate-800 transition"
-            >
-              <Compass className="w-3.5 h-3.5" /> Microsoft
-            </button>
-          </div>
-        </div>
-      </main>
-      <footer className="text-center text-xs text-slate-600">© 2026 CorçaCRM Technologies Inc. — LGPD Enforced</footer>
-    </div>
-  );
-}
+          <div className="flex flex-col sm:flex-row gap-4 pt-4 text-xs text-neutral-400 dark:text-neutral-500 font-medium">
+            <div className="flex items-center gap-1.5">
+              <Target className="
