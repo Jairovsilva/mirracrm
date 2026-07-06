@@ -26,9 +26,10 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
     }
   }, []);
 
+  // 🎯 FILTRO CORRIGIDO: Retorna apenas leads que pertencem ao usuário logado no momento
   const myLeads = leads.filter(l => {
     const owner = (l as any).userOwner;
-    return !owner || owner === currentUserEmail || owner === 'system';
+    return owner === currentUserEmail;
   });
 
   const mapRowToLead = (row: any) => {
@@ -60,6 +61,8 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
       cnpj: cnpj,
       temperatura: 'frio' as const,
       stage: 'entrada' as const,
+      // 🔒 Vincula diretamente o lead importado ao e-mail do usuário atual logado
+      userOwner: currentUserEmail 
     };
   };
 
