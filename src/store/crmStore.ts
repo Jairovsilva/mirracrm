@@ -1,3 +1,5 @@
+'use client';
+
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
@@ -73,7 +75,6 @@ interface CRMState {
 
   clearStorage: () => void;
 
-  // 🚀 ADICIONADO: Métodos para controle e monitoramento de equipe pontuais
   registerVendedor: (email: string, nomeVendedor: string) => { success: boolean; message: string };
   getCompanyUsers: () => User[];
   getCompanyLeads: () => Lead[];
@@ -115,7 +116,7 @@ export const useCRMStore = create<CRMState>()(
 
       addLead: (newLead) => set((state) => {
         const currentUser = state.currentUser;
-        const userId = currentUser?.id || (typeof window !== 'undefined' ? localStorage.getItem('crm_current_user') || 'system' : 'system');
+        const userId = currentUser?.id || 'system';
         return {
           leads: [
             ...state.leads,
@@ -182,7 +183,7 @@ export const useCRMStore = create<CRMState>()(
 
       login: (email, _password) => {
         const state = get();
-        const user = state.registeredUsers.find((u) => u.email === email);
+        const user = state.registeredUsers.find((u) => u.email.toLowerCase().trim() === email.toLowerCase().trim());
         if (user) {
           set({ currentUser: user });
           if (typeof window !== 'undefined') {
@@ -196,21 +197,24 @@ export const useCRMStore = create<CRMState>()(
 
       register: (email, _password) => {
         const state = get();
-        const existing = state.registeredUsers.find((u) => u.email === email);
+        const cleanEmail = email.toLowerCase().trim();
+        const existing = state.registeredUsers.find((u) => u.email.toLowerCase().trim() === cleanEmail);
         if (existing) return false;
 
-        const domain = email.split('@')[1] || 'empresa';
+        const domain = cleanEmail.split('@')[1] || 'empresa';
         const company = domain.split('.')[0].charAt(0).toUpperCase() + domain.split('.')[0].slice(1);
         const newUser: User = {
           id: Math.random().toString(36).substring(2, 9),
-          email,
+          email: cleanEmail,
           role: 'admin_principal',
           empresa: company,
         };
+        
         set({
           registeredUsers: [...state.registeredUsers, newUser],
           currentUser: newUser,
         });
+
         if (typeof window !== 'undefined') {
           localStorage.setItem('crm_current_user', newUser.email);
           localStorage.setItem('crm_session_active', 'true');
@@ -218,17 +222,20 @@ export const useCRMStore = create<CRMState>()(
         return true;
       },
 
+      // 🛠️ CORREÇÃO DO LOGOUT RESIDUAL
       logout: () => {
         set({ currentUser: null });
         if (typeof window !== 'undefined') {
           localStorage.removeItem('crm_current_user');
           localStorage.removeItem('crm_session_active');
+          // Força a limpeza completa do cache local temporário para desvincular contas antigas
+          localStorage.removeItem('corca_crm_storage');
+          window.location.reload(); 
         }
       },
 
       clearStorage: () => set({ leads: [], alerts: [] }),
 
-      // 🚀 IMPLEMENTAÇÃO: Métodos Corporativos Multi-Usuário Avançados
       registerVendedor: (email, nomeVendedor) => {
         const state = get();
         const admin = state.currentUser;
@@ -236,22 +243,22 @@ export const useCRMStore = create<CRMState>()(
           return { success: false, message: 'Apenas Administradores Principais podem criar vendedores.' };
         }
 
-        const existing = state.registeredUsers.find((u) => u.email === email);
+        const cleanEmail = email.toLowerCase().trim();
+        const existing = state.registeredUsers.find((u) => u.email.toLowerCase().trim() === cleanEmail);
         if (existing) return { success: false, message: 'Este e-mail de vendedor já está registrado.' };
 
         const newVendedor: User = {
           id: Math.random().toString(36).substring(2, 9),
-          email,
+          email: cleanEmail,
           role: 'vendedor',
-          empresa: admin.empresa, // Vincula à mesma empresa do criador para controle de visão
+          empresa: admin.empresa,
         };
 
         set({ registeredUsers: [...state.registeredUsers, newVendedor] });
         
-        // Simula criação de credencial no seu ecossistema localStorage
         if (typeof window !== 'undefined') {
-          localStorage.setItem(`crm_pwd_${email.toLowerCase().trim()}`, '123456'); // Senha inicial padrão corporativa
-          localStorage.setItem(`crm_name_${email.toLowerCase().trim()}`, nomeVendedor);
+          localStorage.setItem(`crm_pwd_${cleanEmail}`, '123456');
+          localStorage.setItem(`crm_name_${cleanEmail}`, nomeVendedor);
         }
 
         return { success: true, message: `Vendedor ${nomeVendedor} adicionado com sucesso à empresa ${admin.empresa}!` };
@@ -260,16 +267,21 @@ export const useCRMStore = create<CRMState>()(
       getCompanyUsers: () => {
         const state = get();
         if (!state.currentUser) return [];
-        // Filtra todos os membros cadastrados pertencentes à mesma empresa
         return state.registeredUsers.filter((u) => u.empresa === state.currentUser?.empresa);
       },
 
+      // 🛠️ CORREÇÃO DE ESCOPO CORPORATIVO:
       getCompanyLeads: () => {
         const state = get();
         const user = state.currentUser;
         if (!user) return [];
 
-        // Regra de Observador Sênior: Admin vê tudo da empresa, vendedor vê apenas os criados por seu ID único
+        // Se o usuário for um vendedor comum, ele só tem acesso aos dados criados por ele
+        if (user.role === 'vendedor') {
+          return state.leads.filter((l) => l.userId === user.id);
+        }
+
+        // Se for o Admin Principal, ele vê os leads cadastrados pelos vendedores da empresa dele e os do sistema padrão
         if (user.role === 'admin_principal') {
           const companyUserIds = state.registeredUsers
             .filter((u) => u.empresa === user.empresa)
@@ -278,7 +290,7 @@ export const useCRMStore = create<CRMState>()(
           return state.leads.filter((l) => companyUserIds.includes(l.userId) || l.userId === user.id || l.userId === 'system');
         }
 
-        return state.leads.filter((l) => l.userId === user.id);
+        return [];
       }
     }),
     {
