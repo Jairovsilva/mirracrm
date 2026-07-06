@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Image from 'next/image';
 import { useCRMStore } from '@/src/store/crmStore';
-import { Mail, Github, Compass, Lock, ArrowRight, Target, Sparkles, Shield } from 'lucide-react';
+import { Mail, Github, Compass, Lock, ArrowRight, Sparkles } from 'lucide-react';
 
 export default function LandingPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
   const login = useCRMStore((s) => s.login);
@@ -14,17 +14,12 @@ export default function LandingPage({ onAuthSuccess }: { onAuthSuccess: () => vo
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-
     if (isLoginTab) {
       const success = login(email, password);
-      if (success) {
-        onAuthSuccess();
-      }
+      if (success) onAuthSuccess();
     } else {
       const success = register(email, password);
-      if (success) {
-        onAuthSuccess();
-      }
+      if (success) onAuthSuccess();
     }
   };
 
@@ -53,152 +48,152 @@ export default function LandingPage({ onAuthSuccess }: { onAuthSuccess: () => vo
   };
 
   return (
-    <div className="min-h-screen bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 flex flex-col justify-between p-6 md:p-10 tracking-tight font-sans selection:bg-indigo-100">
+    <div className="min-h-screen bg-white text-neutral-900 font-sans antialiased flex flex-col justify-between">
       
-      {/* 🧭 HEADER CLEAN */}
-      <header className="flex justify-between items-center max-w-6xl w-full mx-auto border-b border-neutral-100 dark:border-neutral-900 pb-5">
+      {/* 🧭 HEADER CLEAN (Estilo Helena) */}
+      <header className="w-full max-w-7xl mx-auto px-6 h-20 flex items-center justify-between border-b border-neutral-100">
         <div className="flex items-center gap-3">
           <Image
             src="/davinci_crie_uma_logomarca_para_o_meu_crm_que_ser__chamado.png"
             alt="CorçaCRM"
-            width={34}
-            height={34}
-            className="rounded-xl shadow-sm"
+            width={32}
+            height={32}
+            className="rounded-lg"
           />
-          <span className="text-lg font-bold tracking-tight text-neutral-950 dark:text-white">
-            Corça<span className="text-indigo-600 dark:text-indigo-400 font-light">CRM</span>
+          <span className="font-bold text-lg tracking-tight text-neutral-950">
+            Corça<span className="font-normal text-indigo-600">CRM</span>
           </span>
         </div>
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-neutral-50 dark:bg-neutral-900 text-[11px] font-medium text-neutral-500 uppercase tracking-wider border border-neutral-100 dark:border-neutral-800">
-          Inteligência Comercial B2B
+        
+        <div className="flex items-center gap-4">
+          <button 
+            type="button"
+            onClick={() => setIsLoginTab(true)}
+            className={`text-sm font-medium transition-colors ${isLoginTab ? 'text-indigo-600' : 'text-neutral-500 hover:text-neutral-950'}`}
+          >
+            Entrar
+          </button>
+          <button 
+            type="button"
+            onClick={() => setIsLoginTab(false)}
+            className="text-sm font-medium bg-neutral-950 hover:bg-neutral-800 text-white px-5 py-2.5 rounded-full transition-all shadow-sm"
+          >
+            Teste Grátis
+          </button>
         </div>
       </header>
 
-      {/* 🚀 CONTEÚDO PRINCIPAL (Grid Simétrico & Espaçado) */}
-      <main className="max-w-6xl w-full mx-auto grid grid-cols-1 lg:grid-cols-12 gap-12 items-center my-auto py-12">
+      {/* 🚀 LAYOUT DE ENTRADA CONTEMPORÂNEO */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-6 grid grid-cols-1 lg:grid-cols-12 gap-12 items-center py-12">
         
-        {/* Lado Esquerdo: Frase de Impacto e Atração */}
+        {/* LADO ESQUERDO: Posicionamento de Marca & Atração */}
         <div className="lg:col-span-7 space-y-6 text-left">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/40 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wide">
-            <Sparkles className="w-3 h-3" /> Padrão Enterprise — Salesforce & HubSpot Style
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 text-[11px] font-semibold text-indigo-600 uppercase tracking-wider">
+            <Sparkles className="w-3 h-3" /> White Label — Inteligência de Vendas B2B
           </div>
           
-          <h2 className="text-4xl sm:text-5xl md:text-6xl font-light text-neutral-950 dark:text-white leading-[1.12] tracking-tight">
-            Mova seus negócios sem <span className="font-semibold text-indigo-600 dark:text-indigo-400">trações desnecessárias.</span>
-          </h2>
+          <h1 className="text-4xl sm:text-5xl md:text-6xl font-light text-neutral-950 tracking-tight leading-[1.12]">
+            O CRM que aprende a cada interação e <span className="font-semibold text-indigo-600">converte intenção em receita</span>
+          </h1>
           
-          {/* ✨ FRASE DE IMPACTO MOTIVACIONAL PARA ATRAÇÃO */}
-          <p className="text-lg text-neutral-500 dark:text-neutral-400 font-normal leading-relaxed max-w-xl">
-            Transforme dados frios em relações comerciais previsíveis. O ecossistema dinâmico projetado para dar clareza ao seu funil, maximizar a produtividade do seu time e acelerar suas conversões diárias.
+          <p className="text-lg text-neutral-500 font-normal leading-relaxed max-w-xl">
+            Conecte equipes, gerencie leads e unifique seus dados comerciais. Uma tecnologia robusta desenhada especificamente para sustentar e acelerar o crescimento previsível do seu negócio.
           </p>
-
-          <div className="flex flex-col sm:flex-row gap-4 pt-4 text-xs text-neutral-400 dark:text-neutral-500 font-medium">
-            <div className="flex items-center gap-1.5">
-              <Target className="w-4 h-4 text-neutral-300 dark:text-neutral-800" /> Gestão de Leads por Dono
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Shield className="w-4 h-4 text-neutral-300 dark:text-neutral-800" /> Isolamento Completo de Workspace
-            </div>
-          </div>
         </div>
 
-        {/* Lado Direito: Formulário Contemporâneo */}
-        <div className="lg:col-span-5 bg-white dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800/80 p-8 rounded-2xl w-full max-w-md justify-self-center lg:justify-self-end shadow-xl shadow-neutral-100/40 dark:shadow-none">
+        {/* LADO DIREITO: Formulário de Entrada Limpo */}
+        <div className="lg:col-span-5 w-full max-w-md bg-white border border-neutral-200/60 p-8 rounded-3xl justify-self-center lg:justify-self-end shadow-xl shadow-neutral-100/50">
           
-          {/* Seletor de Abas Minimalista */}
-          <div className="flex border-b border-neutral-100 dark:border-neutral-800 mb-6">
+          {/* Abas internas */}
+          <div className="flex border-b border-neutral-100 mb-6">
             <button
               type="button"
               onClick={() => { setIsLoginTab(true); setPassword(''); }}
-              className={`flex-1 pb-3 text-xs uppercase tracking-wider font-bold transition-all ${isLoginTab ? 'border-b-2 border-indigo-600 text-neutral-950 dark:text-white' : 'text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300'}`}
+              className={`flex-1 pb-3 text-xs uppercase tracking-wider font-bold transition-all ${isLoginTab ? 'border-b-2 border-indigo-600 text-neutral-950' : 'text-neutral-400 hover:text-neutral-600'}`}
             >
-              Entrar
+              Acessar Conta
             </button>
             <button
               type="button"
               onClick={() => { setIsLoginTab(false); setPassword(''); }}
-              className={`flex-1 pb-3 text-xs uppercase tracking-wider font-bold transition-all ${!isLoginTab ? 'border-b-2 border-indigo-600 text-neutral-950 dark:text-white' : 'text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300'}`}
+              className={`flex-1 pb-3 text-xs uppercase tracking-wider font-bold transition-all ${!isLoginTab ? 'border-b-2 border-indigo-600 text-neutral-950' : 'text-neutral-400 hover:text-neutral-600'}`}
             >
-              Cadastrar
+              Criar Workspace
             </button>
           </div>
 
-          <h3 className="text-xl font-semibold text-neutral-900 dark:text-white mb-1">
-            {isLoginTab ? 'Acesse sua conta' : 'Crie seu workspace'}
+          <h3 className="text-xl font-semibold text-neutral-950 mb-1">
+            {isLoginTab ? 'Corça CRM Workspace' : 'Cadastre sua Empresa'}
           </h3>
-          <p className="text-xs text-neutral-400 dark:text-neutral-500 mb-6">
-            {isLoginTab ? 'Use suas credenciais corporativas' : 'Cadastre sua empresa usando e-mail profissional'}
+          <p className="text-xs text-neutral-400 mb-6">
+            {isLoginTab ? 'Insira suas credenciais de acesso corporativo' : 'Primeiro usuário cadastrado assumirá o papel de Admin Principal.'}
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="text-xs font-semibold text-neutral-500 dark:text-neutral-400">E-mail Corporativo</label>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">Endereço de E-mail</label>
               <input
                 type="email"
                 required
-                placeholder="nome@suaempresa.com.br"
+                placeholder="seu-email@provedor.com"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                className="w-full mt-1.5 p-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/70 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none focus:border-indigo-600 focus:bg-white dark:focus:bg-black transition"
+                className="w-full mt-1.5 p-3 rounded-xl bg-neutral-50 border border-neutral-200 text-sm text-neutral-900 placeholder-neutral-400 focus:outline-none focus:border-indigo-600 focus:bg-white transition"
               />
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-neutral-500 dark:text-neutral-400">Senha</label>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">Senha de Segurança</label>
               <div className="relative mt-1.5">
                 <input
                   type="password"
                   required
                   minLength={4}
-                  placeholder={isLoginTab ? "Digite sua senha" : "Defina uma senha segura"}
+                  placeholder="******"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  className="w-full p-3 pl-10 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/70 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none focus:border-indigo-600 focus:bg-white dark:focus:bg-black transition"
+                  className="w-full p-3 pl-10 rounded-xl bg-neutral-50 border border-neutral-200 text-sm text-neutral-900 placeholder-neutral-400 focus:outline-none focus:border-indigo-600 focus:bg-white transition"
                 />
-                <Lock className="w-4 h-4 text-neutral-400 dark:text-neutral-600 absolute left-3 top-3.5" />
+                <Lock className="w-4 h-4 text-neutral-400 absolute left-3 top-3.5" />
               </div>
             </div>
 
-            <button type="submit" className="w-full h-12 mt-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs uppercase tracking-wider font-bold rounded-xl shadow-md shadow-indigo-100 dark:shadow-none transition flex justify-center items-center gap-2">
-              {isLoginTab ? 'Entrar' : 'Concluir Cadastro'} <ArrowRight className="w-4 h-4" />
+            <button type="submit" className="w-full h-12 mt-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-full transition flex justify-center items-center gap-2 shadow-lg shadow-indigo-100">
+              {isLoginTab ? 'Entrar no Painel' : 'Concluir Cadastro'} <ArrowRight className="w-4 h-4" />
             </button>
           </form>
 
-          {/* Seção SSO Mantida Intacta */}
-          <div className="text-center text-[10px] text-neutral-400 dark:text-neutral-600 my-5 uppercase tracking-widest font-bold">ou use Single Sign-On</div>
-          <div className="grid grid-cols-3 gap-2 text-[11px] font-medium">
+          {/* SSO Integrado */}
+          <div className="text-center text-[10px] text-neutral-400 my-5 uppercase tracking-widest font-bold">ou autenticar via</div>
+          <div className="grid grid-cols-3 gap-2 text-xs">
             <button
               type="button"
               onClick={() => handleSSOAuth('Google Cloud Identity', 'diretor@suaempresa.com.br')}
-              className="p-2.5 border border-neutral-200 dark:border-neutral-800 rounded-xl bg-white dark:bg-neutral-950 text-neutral-600 dark:text-neutral-400 flex justify-center items-center gap-1 hover:bg-neutral-50 dark:hover:bg-neutral-900 transition"
+              className="p-2.5 border border-neutral-200 rounded-xl bg-white text-neutral-600 flex justify-center items-center gap-1 hover:bg-neutral-50 transition"
             >
               <Mail className="w-3.5 h-3.5 text-neutral-400" /> Google
             </button>
             <button
               type="button"
               onClick={() => handleSSOAuth('GitHub Enterprise', 'cto@empresa.org')}
-              className="p-2.5 border border-neutral-200 dark:border-neutral-800 rounded-xl bg-white dark:bg-neutral-950 text-neutral-600 dark:text-neutral-400 flex justify-center items-center gap-1 hover:bg-neutral-50 dark:hover:bg-neutral-900 transition"
+              className="p-2.5 border border-neutral-200 rounded-xl bg-white text-neutral-600 flex justify-center items-center gap-1 hover:bg-neutral-50 transition"
             >
               <Github className="w-3.5 h-3.5 text-neutral-400" /> GitHub
             </button>
             <button
               type="button"
               onClick={() => handleSSOAuth('Azure AD / Microsoft', 'vp@microsoft-office.com')}
-              className="p-2.5 border border-neutral-200 dark:border-neutral-800 rounded-xl bg-white dark:bg-neutral-950 text-neutral-600 dark:text-neutral-400 flex justify-center items-center gap-1 hover:bg-neutral-50 dark:hover:bg-neutral-900 transition"
+              className="p-2.5 border border-neutral-200 rounded-xl bg-white text-neutral-600 flex justify-center items-center gap-1 hover:bg-neutral-50 transition"
             >
               <Compass className="w-3.5 h-3.5 text-neutral-400" /> Azure
             </button>
           </div>
-
-          <p className="text-[10px] text-center text-neutral-400 dark:text-neutral-500 mt-5 leading-normal">
-            * {isLoginTab ? 'O acesso concede visualização imediata ao seu pipeline único.' : 'O primeiro usuário registrado assume o papel de Administrador da Empresa.'}
-          </p>
         </div>
       </main>
 
       {/* 🏁 RODAPÉ DISCRETO */}
-      <footer className="text-center text-xs text-neutral-400 dark:text-neutral-600 border-t border-neutral-100 dark:border-neutral-900 pt-5">
-        © 2026 CorçaCRM Technologies Inc. — LGPD Enforced
+      <footer className="text-center py-6 border-t border-neutral-100 text-xs text-neutral-400">
+        © 2026 CorçaCRM Technologies Inc. — Enterprise Standard & LGPD Enforced
       </footer>
     </div>
   );
