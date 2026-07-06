@@ -22,27 +22,34 @@ export function DashboardView({ onOpenLead, onAddLead, onViewKanban }: Dashboard
   const leads = useCRMStore((s) => s.leads);
   const currentUser = useCRMStore((s) => s.currentUser);
 
-  const totalLeads = leads.length;
-  const hotLeads = leads.filter((l) => l.temperatura === 'quente').length;
-  const meetingsScheduled = leads.filter((l) => l.stage === 'reuniao').length;
-  const pipelineValue = leads.reduce((sum, l) => sum + (l.valorProposta || 0), 0);
+  // 🔒 ISOLAMENTO DE DADOS: Filtra para que o usuário veja apenas os SEUS próprios leads
+  const myLeads = leads.filter((l) => {
+    const owner = (l as any).userOwner;
+    return owner === currentUser?.email;
+  });
+
+  // 📊 Todas as métricas agora utilizam exclusivamente 'myLeads' ao invés da store global
+  const totalLeads = myLeads.length;
+  const hotLeads = myLeads.filter((l) => l.temperatura === 'quente').length;
+  const meetingsScheduled = myLeads.filter((l) => l.stage === 'reuniao').length;
+  const pipelineValue = myLeads.reduce((sum, l) => sum + (l.valorProposta || 0), 0);
 
   const stageData = [
-    { name: t.stages.entrada, value: leads.filter((l) => l.stage === 'entrada').length, color: 'hsl(var(--chart-1))' },
-    { name: t.stages.enriquecer, value: leads.filter((l) => l.stage === 'enriquecer').length, color: 'hsl(var(--chart-2))' },
-    { name: t.stages.reuniao, value: leads.filter((l) => l.stage === 'reuniao').length, color: 'hsl(var(--chart-3))' },
-    { name: t.stages.fim_cadencia, value: leads.filter((l) => l.stage === 'fim_cadencia').length, color: 'hsl(var(--chart-4))' },
+    { name: t.stages.entrada, value: myLeads.filter((l) => l.stage === 'entrada').length, color: 'hsl(var(--chart-1))' },
+    { name: t.stages.enriquecer, value: myLeads.filter((l) => l.stage === 'enriquecer').length, color: 'hsl(var(--chart-2))' },
+    { name: t.stages.reuniao, value: myLeads.filter((l) => l.stage === 'reuniao').length, color: 'hsl(var(--chart-3))' },
+    { name: t.stages.fim_cadencia, value: myLeads.filter((l) => l.stage === 'fim_cadencia').length, color: 'hsl(var(--chart-4))' },
   ];
 
   const tempData = [
-    { name: t.temperature.frio, value: leads.filter((l) => l.temperatura === 'frio').length, color: '#3b82f6' },
-    { name: t.temperature.morno, value: leads.filter((l) => l.temperatura === 'morno').length, color: '#f59e0b' },
-    { name: t.temperature.quente, value: leads.filter((l) => l.temperatura === 'quente').length, color: '#ef4444' },
+    { name: t.temperature.frio, value: myLeads.filter((l) => l.temperatura === 'frio').length, color: '#3b82f6' },
+    { name: t.temperature.morno, value: myLeads.filter((l) => l.temperatura === 'morno').length, color: '#f59e0b' },
+    { name: t.temperature.quente, value: myLeads.filter((l) => l.temperatura === 'quente').length, color: '#ef4444' },
   ];
 
   const pipelineByStage = stageData.map((s) => ({
     name: s.name,
-    valor: leads
+    valor: myLeads
       .filter((l) => t.stages[l.stage] === s.name)
       .reduce((sum, l) => sum + (l.valorProposta || 0), 0),
   }));
@@ -210,14 +217,14 @@ export function DashboardView({ onOpenLead, onAddLead, onViewKanban }: Dashboard
           <CardTitle className="text-base">{t.dashboard.recentLeads}</CardTitle>
         </CardHeader>
         <CardContent>
-          {leads.length === 0 ? (
+          {myLeads.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <Users className="w-10 h-10 mx-auto mb-3 opacity-40" />
               <p className="text-sm">{t.common.noData}</p>
             </div>
           ) : (
             <div className="space-y-2">
-              {leads.slice(0, 6).map((lead) => (
+              {myLeads.slice(0, 6).map((lead) => (
                 <button
                   key={lead.id}
                   onClick={() => onOpenLead(lead.id)}
