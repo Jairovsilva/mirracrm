@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { useTranslation } from '@/src/lib/useTranslation';
 import { useCRMStore } from '@/src/store/crmStore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,25 +20,15 @@ interface DashboardViewProps {
 
 export function DashboardView({ onOpenLead, onAddLead, onViewKanban }: DashboardViewProps) {
   const { t } = useTranslation();
-  const leads = useCRMStore((s) => s.leads);
   
-  // 🔄 Estado local para garantir sincronia real com o usuário do LocalStorage
-  const [activeEmail, setActiveEmail] = useState('');
+  // 🔒 SEGURANÇA MÁXIMA: Puxamos a função de escopo corporativo e o usuário logado do Zustand
+  const getCompanyLeads = useCRMStore((s) => s.getCompanyLeads);
+  const currentUser = useCRMStore((s) => s.currentUser);
+  
+  // Obtém exclusivamente os leads isolados da empresa atual
+  const myLeads = getCompanyLeads();
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const storedUser = localStorage.getItem('crm_current_user') || '';
-      setActiveEmail(storedUser);
-    }
-  }, []);
-
-  // 🔒 ISOLAMENTO REAL: Filtra os leads pelo email verificado no LocalStorage
-  const myLeads = leads.filter((l) => {
-    const owner = (l as any).userOwner;
-    return owner === activeEmail;
-  });
-
-  // 📊 Métricas baseadas unicamente no usuário logado
+  // 📊 Métricas baseadas unicamente no escopo isolado correto
   const totalLeads = myLeads.length;
   const hotLeads = myLeads.filter((l) => l.temperatura === 'quente').length;
   const meetingsScheduled = myLeads.filter((l) => l.stage === 'reuniao').length;
@@ -105,14 +95,13 @@ export function DashboardView({ onOpenLead, onAddLead, onViewKanban }: Dashboard
 
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-[1600px] mx-auto animate-fade-in">
-      {/* Welcome header corrigido com o activeEmail real */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">
-            {t.dashboard.welcome}, {activeEmail ? activeEmail.split('@')[0] : 'Usuário'}
+            {t.dashboard.welcome}, {currentUser?.email ? currentUser.email.split('@')[0] : 'Usuário'}
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            {new Date().toLocaleDateString(currentLanguageDate(), { weekday: 'long', day: 'numeric', month: 'long' })}
+            {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
           </p>
         </div>
         <div className="flex gap-2">
@@ -155,7 +144,6 @@ export function DashboardView({ onOpenLead, onAddLead, onViewKanban }: Dashboard
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Pipeline by stage */}
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">{t.dashboard.pipelineByStage}</CardTitle>
@@ -181,7 +169,6 @@ export function DashboardView({ onOpenLead, onAddLead, onViewKanban }: Dashboard
           </CardContent>
         </Card>
 
-        {/* Temperature distribution */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base">{t.dashboard.temperatureDistribution}</CardTitle>
@@ -261,8 +248,4 @@ export function DashboardView({ onOpenLead, onAddLead, onViewKanban }: Dashboard
       </Card>
     </div>
   );
-}
-
-function currentLanguageDate() {
-  return 'pt-BR';
 }
