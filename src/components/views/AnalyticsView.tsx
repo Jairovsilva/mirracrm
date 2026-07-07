@@ -5,20 +5,16 @@ import { useCRMStore } from '@/src/store/crmStore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend, AreaChart, Area, RadialBarChart, RadialBar,
+  Legend, AreaChart, Area, RadialBarChart, RadialBar,
 } from 'recharts';
 import { TrendingUp, Users, Target, DollarSign, Activity as ActivityIcon } from 'lucide-react';
 
 export function AnalyticsView() {
   const { t } = useTranslation();
-  const rawLeads = useCRMStore((s) => s.leads);
-  const currentUser = useCRMStore((s) => s.currentUser);
+  const getCompanyLeads = useCRMStore((s) => s.getCompanyLeads);
 
-  // 🌟 INSERIDO: Filtro de Segurança por Escopo de Usuário
-  // Garante que o vendedor não puxe dados globais ou de outros usuários ao criar uma conta nova
-  const leads = currentUser?.role === 'admin_principal'
-    ? rawLeads.filter((l) => l.userId === currentUser.id || l.userId === 'system') // Adapte aqui caso queira mapear por empresa futuramente
-    : rawLeads.filter((l) => l.userId === currentUser?.id);
+  // 🎯 FILTRO DE SEGURANÇA CORRIGIDO: Alinha os dados do Analytics rigorosamente com a empresa/usuário atual
+  const leads = getCompanyLeads();
 
   const stageData = [
     { name: t.stages.entrada, value: leads.filter((l) => l.stage === 'entrada').length, color: 'hsl(var(--chart-1))' },
@@ -40,15 +36,6 @@ export function AnalyticsView() {
       .reduce((sum, l) => sum + (l.valorProposta || 0), 0),
   }));
 
-  // Funil dinâmico baseado no escopo correto de leads
-  const funnelData = [
-    { stage: t.stages.entrada, count: leads.length, pct: leads.length > 0 ? 100 : 0 },
-    { stage: t.stages.enriquecer, count: Math.floor(leads.length * 0.65), pct: leads.length > 0 ? 65 : 0 },
-    { stage: t.stages.reuniao, count: Math.floor(leads.length * 0.35), pct: leads.length > 0 ? 35 : 0 },
-    { stage: t.stages.fim_cadencia, count: Math.floor(leads.length * 0.15), pct: leads.length > 0 ? 15 : 0 },
-  ];
-
-  // Gráfico de tendência reativo
   const trendData = [
     { month: 'Jan', leads: leads.length > 0 ? 12 : 0, reunioes: leads.length > 0 ? 4 : 0 },
     { month: 'Fev', leads: leads.length > 0 ? 18 : 0, reunioes: leads.length > 0 ? 7 : 0 },
@@ -75,7 +62,6 @@ export function AnalyticsView() {
         <p className="text-sm text-muted-foreground mt-1">Análise de performance comercial</p>
       </div>
 
-      {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {kpis.map((kpi, i) => {
           const Icon = kpi.icon;
@@ -93,7 +79,6 @@ export function AnalyticsView() {
         })}
       </div>
 
-      {/* Trend chart */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
@@ -132,9 +117,7 @@ export function AnalyticsView() {
         </CardContent>
       </Card>
 
-      {/* Two-column charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Pipeline by stage */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base">{t.dashboard.pipelineByStage}</CardTitle>
@@ -160,7 +143,6 @@ export function AnalyticsView() {
           </CardContent>
         </Card>
 
-        {/* Temperature radial */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base">{t.dashboard.temperatureDistribution}</CardTitle>
@@ -176,52 +158,11 @@ export function AnalyticsView() {
                   align="right"
                   formatter={(value) => <span className="text-xs text-muted-foreground">{value}</span>}
                 />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: 'hsl(var(--popover))',
-                    border: '1px solid hsl(var(--border))',
-                    borderRadius: '8px',
-                    fontSize: '12px',
-                    color: 'hsl(var(--popover-foreground))',
-                  }}
-                  labelStyle={{ color: 'hsl(var(--popover-foreground))' }}
-                  itemStyle={{ color: 'hsl(var(--popover-foreground))' }}
-                />
               </RadialBarChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
       </div>
-
-      {/* Funnel */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Funil de Conversão</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {funnelData.map((stage, i) => (
-              <div key={i} className="flex items-center gap-4">
-                <div className="w-28 text-sm font-medium shrink-0">{stage.stage}</div>
-                <div className="flex-1">
-                  <div className="h-8 rounded-lg bg-secondary overflow-hidden relative">
-                    <div
-                      className="h-full rounded-lg transition-all duration-500 flex items-center justify-end px-3"
-                      style={{
-                        width: `${stage.pct}%`,
-                        backgroundColor: stageData[i]?.color || 'hsl(var(--primary))',
-                      }}
-                    >
-                      <span className="text-xs font-semibold text-white">{stage.count}</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="w-12 text-sm text-muted-foreground text-right shrink-0">{stage.pct}%</div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }
