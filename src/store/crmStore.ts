@@ -265,7 +265,6 @@ export const useCRMStore = create<CRMState>()(
         return { success: true, message: `Vendedor ${nomeVendedor} adicionado com sucesso à empresa ${admin.empresa}!` };
       },
 
-      // RETORNO REATIVO PURIFICADO: Previne loops infinitos no React sem misturar sessões em caches globais.
       getCompanyUsers: () => {
         const state = get();
         if (!state.currentUser) return [];
@@ -302,14 +301,12 @@ export const useCRMStore = create<CRMState>()(
       storage: createJSONStorage(() => ({
         getItem: (name) => {
           if (typeof window === 'undefined') return null;
-          // Isolamento de Tenant na Leitura: Busca a chave associada ao usuário ativo se houver
           const activeUser = localStorage.getItem('crm_current_user');
           const tenantKey = activeUser ? `${name}_${btoa(activeUser).replace(/=/g, '')}` : name;
           return localStorage.getItem(tenantKey);
         },
         setItem: (name, value) => {
           if (typeof window === 'undefined') return;
-          // Isolamento de Tenant na Escrita: Grava em caminhos completamente diferentes por empresa
           const activeUser = localStorage.getItem('crm_current_user');
           const tenantKey = activeUser ? `${name}_${btoa(activeUser).replace(/=/g, '')}` : name;
           localStorage.setItem(tenantKey, value);
@@ -320,7 +317,7 @@ export const useCRMStore = create<CRMState>()(
           const tenantKey = activeUser ? `${name}_${btoa(activeUser).replace(/=/g, '')}` : name;
           localStorage.removeItem(tenantKey);
         }
-      })),
+      }))
     }
   ]
 );
