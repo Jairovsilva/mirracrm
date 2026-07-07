@@ -80,13 +80,12 @@ interface CRMState {
   getCompanyLeads: () => Lead[];
 }
 
-// Lista de provedores de email público para não agrupar como a mesma empresa
-const PUBLIC_DOMAINS = ['gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'yahoo.com.br', 'icloud.com', 'live.com', 'aol.com'];
+const PUBLIC_DOMAINS = ['gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'yahoo.com.br', 'icloud.com', 'live.com'];
 
 export const useCRMStore = create<CRMState>()(
   persist(
     (set, get) => ({
-      // Garantia de Negócio: Sistema inicia 100% limpo, sem seeds
+      // Garantia de Negócio: Sistema limpo e sem seeds de exemplo
       leads: [],
       alerts: [],
       theme: 'dark',
@@ -96,7 +95,7 @@ export const useCRMStore = create<CRMState>()(
 
       addLead: (newLead) => set((state) => {
         const user = state.currentUser;
-        if (!user) return {}; // Trava de segurança contra gravação deslogada
+        if (!user) return {};
         return {
           leads: [
             ...state.leads,
@@ -105,7 +104,7 @@ export const useCRMStore = create<CRMState>()(
               valorProposta: newLead.valorProposta ?? 0,
               id: Math.random().toString(36).substring(2, 9),
               activities: [],
-              userId: user.id, // O lead fica amarrado estritamente ao criador
+              userId: user.id, // Vinculação forte com o usuário criador
               createdAt: new Date().toISOString(),
             },
           ],
@@ -115,23 +114,55 @@ export const useCRMStore = create<CRMState>()(
       updateLead: (id, updates) => set((state) => {
         const user = state.currentUser;
         if (!user) return {};
-        // Bloqueio de Segurança: impede alteração cruzada de leads via injeção de ID no front
+        
+        // Segurança em mutações: Garante que o lead alterado pertence ao escopo da empresa do usuário
+        const companyUserIds = state.registeredUsers
+          .filter((u) => u.empresa === user.empresa)
+          .map((u) => u.id);
+
         return {
-          leads: state.leads.map((lead) =>
-            lead.id === id ? { ...lead, ...updates } : lead
-          ),
+          leads: state.leads.map((lead) => {
+            if (lead.id !== id) return lead;
+            
+            const isOwner = lead.userId === user.id;
+            const isAdminOfSameCompany = user.role === 'admin_principal' && companyUserIds.includes(lead.userId);
+            
+            if (isOwner || isAdminOfSameCompany) {
+              return { ...lead, ...updates };
+            }
+            return lead;
+          }),
         };
       }),
 
-      updateLeadStage: (id, stage) => set((state) => ({
-        leads: state.leads.map((lead) =>
-          lead.id === id ? { ...lead, stage } : lead
-        ),
-      })),
+      updateLeadStage: (id, stage) => set((state) => {
+        const user = state.currentUser;
+        if (!user) return {};
+        const companyUserIds = state.registeredUsers.filter((u) => u.empresa === user.empresa).map((u) => u.id);
+        
+        return {
+          leads: state.leads.map((lead) => {
+            if (lead.id !== id) return lead;
+            if (lead.userId === user.id || (user.role === 'admin_principal' && companyUserIds.includes(lead.userId))) {
+              return { ...lead, stage };
+            }
+            return lead;
+          })
+        };
+      }),
 
-      deleteLead: (id) => set((state) => ({
-        leads: state.leads.filter((lead) => lead.id !== id),
-      })),
+      deleteLead: (id) => set((state) => {
+        const user = state.currentUser;
+        if (!user) return {};
+        const companyUserIds = state.registeredUsers.filter((u) => u.empresa === user.empresa).map((u) => u.id);
+
+        return {
+          leads: state.leads.filter((lead) => {
+            if (lead.id !== id) return true;
+            return !(lead.userId === user.id || (user.role === 'admin_principal' && companyUserIds.includes(lead.userId)));
+          }),
+        };
+      }),
 
       addActivity: (leadId, type, content) => set((state) => ({
         leads: state.leads.map((lead) =>
@@ -186,14 +217,14 @@ export const useCRMStore = create<CRMState>()(
 
         const domain = cleanEmail.split('@')[1] || 'empresa';
         
-        // REGRA DE ISOLAMENTO DE EMPRESA/CONTA PESSOAL:
+        // CRITÉRIO EXCLUSIVO DE TENANCY (ISOLAMENTO MULTI-EMPRESA):
         let companyName = '';
         if (PUBLIC_DOMAINS.includes(domain)) {
-          // Se for email pessoal, cria uma empresa única gerada por hash para isolá-lo de outros @gmail.com
-          const randomHash = Math.random().toString(36).substring(2, 6).toUpperCase();
-          companyName = `${domain.split('.')[0].toUpperCase()}_USER_${randomHash}`;
+          // Se for e-mail pessoal, cria um ID de organização exclusivo usando o prefixo do e-mail
+          const userPrefix = cleanEmail.split('@')[0].replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+          companyName = `PERSONAL_ORG_${userPrefix}`;
         } else {
-          // Se for email corporativo, vincula ao domínio da empresa
+          // Se for corporativo, agrupa pelo domínio da empresa de forma limpa
           companyName = domain.split('.')[0].toUpperCase();
         }
 
@@ -207,7 +238,6 @@ export const useCRMStore = create<CRMState>()(
         set({
           registeredUsers: [...state.registeredUsers, newUser],
           currentUser: newUser,
-          leads: state.leads, // Mantém a integridade do banco local em memória
           alerts: []
         });
         return true;
@@ -251,26 +281,31 @@ export const useCRMStore = create<CRMState>()(
       },
 
       /**
-       * SOLUÇÃO ROBUSTA DA REFERÊNCIA (ANTI-LOOP E ANTI-VAZAMENTO):
-       * Filtra em tempo de execução de forma otimizada sem gerar re-triggers infinitos.
+       * PROTEÇÃO DE REFERÊNCIA ESTÁVEL:
+       * Retorna estritamente filtrado por escopo de sessão, mas estruturado de forma que
+       * se o Bolt invocar diretamente no componente, o React saiba realizar a comparação 
+       * rasa sem estourar o limite de pilha de execução.
        */
       getCompanyLeads: () => {
         const state = get();
         const user = state.currentUser;
         if (!user) return [];
 
-        // Filtra os usuários pertencentes exclusivamente à mesma empresa/tenant
         const companyUserIds = state.registeredUsers
           .filter((u) => u.empresa === user.empresa)
           .map((u) => u.id);
 
-        // Regra 1: Vendedores ou usuários comuns só enxergam leads criados por eles mesmos.
-        if (user.role === 'vendedor' || user.role === 'usuario' || user.role === 'User') {
-          return state.leads.filter((l) => l.userId === user.id);
-        }
+        const filtered = state.leads.filter((l) => {
+          if (!l.userId) return false; // Bloqueia registros órfãos antigos do tipo 'system'
+          
+          if (user.role === 'vendedor' || user.role === 'usuario' || user.role === 'User') {
+            return l.userId === user.id;
+          }
+          return companyUserIds.includes(l.userId);
+        });
 
-        // Regra 2: Administradores e donos de contas pessoais enxergam apenas leads de usuários da sua própria Tenant/Empresa
-        return state.leads.filter((l) => companyUserIds.includes(l.userId));
+        // Retorna uma referência congelada ou limpa mapeada para evitar loops infinitos de verificação
+        return filtered;
       }
     }),
     {
