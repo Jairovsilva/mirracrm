@@ -1,5 +1,5 @@
 'use client';
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState } from 'react';
 import { useCRMStore, type Stage } from '@/src/store/crmStore';
 import { FileSpreadsheet, Trash2, GripVertical, Search, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -12,25 +12,14 @@ interface KanbanViewProps {
 
 export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: KanbanViewProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { leads, addLead, updateLeadStage, deleteLead, theme } = useCRMStore();
+  const { addLead, updateLeadStage, deleteLead, theme, getCompanyLeads } = useCRMStore();
   const [isProcessing, setIsProcessing] = useState(false);
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<Stage | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const [currentUserEmail, setCurrentUserEmail] = useState('');
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setCurrentUserEmail(localStorage.getItem('crm_current_user') || '');
-    }
-  }, []);
-
-  // 🎯 FILTRO CORRIGIDO: Retorna apenas leads que pertencem ao usuário logado no momento
-  const myLeads = leads.filter(l => {
-    const owner = (l as any).userOwner;
-    return owner === currentUserEmail;
-  });
+  // 🎯 FILTRO CORRIGIDO: Utiliza a inteligência de escopo nativa da Store por Empresa/Usuário
+  const myLeads = getCompanyLeads();
 
   const mapRowToLead = (row: any) => {
     const keys = Object.keys(row);
@@ -60,9 +49,7 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
       nomeEmpresa: company || 'Empresa Não Identificada',
       cnpj: cnpj,
       temperatura: 'frio' as const,
-      stage: 'entrada' as const,
-      // 🔒 Vincula diretamente o lead importado ao e-mail do usuário atual logado
-      userOwner: currentUserEmail 
+      stage: 'entrada' as const
     };
   };
 
