@@ -1,7 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
+import { persist } from 'zustand/middleware';
 
 export type Stage = 'entrada' | 'enriquecer' | 'reuniao' | 'fim_cadencia';
 export type Temperature = 'frio' | 'morno' | 'quente';
@@ -104,21 +104,14 @@ const seedAlerts = (): Alert[] => [
   { id: 'a3', type: 'info', message: '2 novos leads importados via Excel.', read: true },
 ];
 
-// Comparador estrutural rápido para evitar re-renders infinitos no React
-const areArraysEqual = (a: any[], b: any[]) => {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
+// Utilitário externo para isolar partições no LocalStorage de forma segura e transparente
+const getTenantKey = (baseName: string): string => {
+  if (typeof window === 'undefined') return baseName;
+  const activeUser = localStorage.getItem('crm_current_user');
+  if (!activeUser) return baseName;
+  // Criptografa levemente em Base64 o e-mail do usuário logado para criar uma chave única por empresa
+  return `${baseName}_${btoa(activeUser).replace(/=/g, '')}`;
 };
-
-// Cache de referências em memória estática e isolada
-let cachedLeadsInput: any[] = [];
-let cachedUsersInput: any[] = [];
-let cachedCurrentUser: any = null;
-let memoizedLeadsResult: Lead[] = [];
-let memoizedUsersResult: User[] = [];
 
 export const useCRMStore = create<CRMState>()(
   persist(
@@ -206,6 +199,24 @@ export const useCRMStore = create<CRMState>()(
           if (typeof window !== 'undefined') {
             localStorage.setItem('crm_current_user', user.email);
             localStorage.setItem('crm_session_active', 'true');
+            
+            // Força a recuperação dos dados específicos deste tenant recém-logado
+            const savedData = localStorage.getItem(`corca_crm_storage_${btoa(user.email).replace(/=/g, '')}`);
+            if (savedData) {
+              try {
+                const parsed = JSON.parse(savedData);
+                if (parsed.state) {
+                  set({
+                    leads: parsed.state.leads || [],
+                    alerts: parsed.state.alerts || [],
+                    theme: parsed.state.theme || 'dark',
+                    currentLanguage: parsed.state.currentLanguage || 'pt'
+                  });
+                }
+              } catch (e) {
+                console.error(e);
+              }
+            }
           }
           set({ currentUser: user });
           return true;
@@ -245,14 +256,7 @@ export const useCRMStore = create<CRMState>()(
           localStorage.removeItem('crm_current_user');
           localStorage.removeItem('crm_session_active');
         }
-        // Reseta referências de cache na saída para evitar vazamentos em troca de abas
-        cachedLeadsInput = [];
-        cachedUsersInput = [];
-        cachedCurrentUser = null;
-        memoizedLeadsResult = [];
-        memoizedUsersResult = [];
-        
-        set({ currentUser: null });
+        set({ currentUser: null, leads: seedLeads(), alerts: seedAlerts() });
         if (typeof window !== 'undefined') {
           window.location.reload();
         }
@@ -288,27 +292,10 @@ export const useCRMStore = create<CRMState>()(
         return { success: true, message: `Vendedor ${nomeVendedor} adicionado com sucesso à empresa ${admin.empresa}!` };
       },
 
-      // MEMOIZAÇÃO BLINDADA: Retorna estritamente a mesma referência se os dados de entrada forem idênticos
       getCompanyUsers: () => {
         const state = get();
         if (!state.currentUser) return [];
-        
-        if (state.registeredUsers === cachedUsersInput && state.currentUser === cachedCurrentUser) {
-          return memoizedUsersResult;
-        }
-
-        const freshFiltered = state.registeredUsers.filter((u) => u.empresa === state.currentUser?.empresa);
-        
-        if (areArraysEqual(freshFiltered, memoizedUsersResult)) {
-          cachedUsersInput = state.registeredUsers;
-          cachedCurrentUser = state.currentUser;
-          return memoizedUsersResult;
-        }
-
-        cachedUsersInput = state.registeredUsers;
-        cachedCurrentUser = state.currentUser;
-        memoizedUsersResult = freshFiltered;
-        return freshFiltered;
+        return state.registeredUsers.filter((u) => u.empresa === state.currentUser?.empresa);
       },
 
       getCompanyLeads: () => {
@@ -316,65 +303,48 @@ export const useCRMStore = create<CRMState>()(
         const user = state.currentUser;
         if (!user) return [];
 
-        if (state.leads === cachedLeadsInput && state.registeredUsers === cachedUsersInput && user === cachedCurrentUser) {
-          return memoizedLeadsResult;
-        }
-
         const companyUserIds = state.registeredUsers
           .filter((u) => u.empresa === user.empresa)
           .map((u) => u.id);
 
-        let freshFiltered: Lead[] = [];
-
         if (user.role === 'vendedor' || user.role === 'usuario' || user.role === 'User') {
-          freshFiltered = state.leads.filter((l) => l.userId === user.id);
-        } else if (user.role === 'admin_principal') {
-          freshFiltered = state.leads.filter((l) => 
+          return state.leads.filter((l) => l.userId === user.id);
+        }
+
+        if (user.role === 'admin_principal') {
+          return state.leads.filter((l) => 
             companyUserIds.includes(l.userId) || 
             l.userId === user.id || 
             l.userId === 'system' || 
             !l.userId
           );
-        } else {
-          freshFiltered = state.leads.filter((l) => companyUserIds.includes(l.userId));
         }
 
-        if (areArraysEqual(freshFiltered, memoizedLeadsResult)) {
-          cachedLeadsInput = state.leads;
-          cachedUsersInput = state.registeredUsers;
-          cachedCurrentUser = user;
-          return memoizedLeadsResult;
-        }
-
-        cachedLeadsInput = state.leads;
-        cachedUsersInput = state.registeredUsers;
-        cachedCurrentUser = user;
-        memoizedLeadsResult = freshFiltered;
-        return freshFiltered;
+        return state.leads.filter((l) => companyUserIds.includes(l.userId));
       }
     }),
     {
-      name: 'corca_crm_storage',
-      storage: createJSONStorage(() => ({
-        getItem: (name) => {
-          if (typeof window === 'undefined') return null;
-          const activeUser = localStorage.getItem('crm_current_user');
-          const tenantKey = activeUser ? `${name}_${btoa(activeUser).replace(/=/g, '')}` : name;
-          return localStorage.getItem(tenantKey);
-        },
-        setItem: (name, value) => {
-          if (typeof window === 'undefined') return;
-          const activeUser = localStorage.getItem('crm_current_user');
-          const tenantKey = activeUser ? `${name}_${btoa(activeUser).replace(/=/g, '')}` : name;
-          localStorage.setItem(tenantKey, value);
-        },
-        removeItem: (name) => {
-          if (typeof window === 'undefined') return;
-          const activeUser = localStorage.getItem('crm_current_user');
-          const tenantKey = activeUser ? `${name}_${btoa(activeUser).replace(/=/g, '')}` : name;
-          localStorage.removeItem(tenantKey);
-        }
-      }))
+      name: 'corca_crm_storage'
     }
   ]
 );
+
+// Interceptador global seguro executado apenas no Client para gravação Multi-tenant automática
+if (typeof window !== 'undefined') {
+  useCRMStore.subscribe((state) => {
+    const activeUser = localStorage.getItem('crm_current_user');
+    if (activeUser) {
+      const tenantKey = `corca_crm_storage_${btoa(activeUser).replace(/=/g, '')}`;
+      const dataToSave = {
+        state: {
+          leads: state.leads,
+          alerts: state.alerts,
+          theme: state.theme,
+          currentLanguage: state.currentLanguage
+        },
+        version: 0
+      };
+      localStorage.setItem(tenantKey, JSON.stringify(dataToSave));
+    }
+  });
+}
