@@ -276,17 +276,14 @@ export const useCRMStore = create<CRMState>()(
         const user = state.currentUser;
         if (!user) return [];
 
-        // Coleta IDs de todos os membros que pertencem à mesma empresa do usuário ativo
         const companyUserIds = state.registeredUsers
           .filter((u) => u.empresa === user.empresa)
           .map((u) => u.id);
 
-        // Se for vendedor comum, só vê os dele
         if (user.role === 'vendedor' || user.role === 'usuario' || user.role === 'User') {
           return state.leads.filter((l) => l.userId === user.id);
         }
 
-        // Se for admin, vê os leads de todos os usuários da empresa + os padrão do sistema
         if (user.role === 'admin_principal') {
           return state.leads.filter((l) => 
             companyUserIds.includes(l.userId) || 
