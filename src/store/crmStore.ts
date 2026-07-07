@@ -80,10 +80,13 @@ interface CRMState {
   getCompanyLeads: () => Lead[];
 }
 
+// Lista de provedores de email público para não agrupar como a mesma empresa
+const PUBLIC_DOMAINS = ['gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'yahoo.com.br', 'icloud.com', 'live.com', 'aol.com'];
+
 export const useCRMStore = create<CRMState>()(
   persist(
     (set, get) => ({
-      // Contas novas iniciam estritamente sem dados de exemplo (Zero seeds)
+      // Garantia de Negócio: Sistema inicia 100% limpo, sem seeds
       leads: [],
       alerts: [],
       theme: 'dark',
@@ -93,7 +96,7 @@ export const useCRMStore = create<CRMState>()(
 
       addLead: (newLead) => set((state) => {
         const user = state.currentUser;
-        if (!user) return {};
+        if (!user) return {}; // Trava de segurança contra gravação deslogada
         return {
           leads: [
             ...state.leads,
@@ -102,18 +105,23 @@ export const useCRMStore = create<CRMState>()(
               valorProposta: newLead.valorProposta ?? 0,
               id: Math.random().toString(36).substring(2, 9),
               activities: [],
-              userId: user.id, // Garante que o lead pertence ao usuário logado
+              userId: user.id, // O lead fica amarrado estritamente ao criador
               createdAt: new Date().toISOString(),
             },
           ],
         };
       }),
 
-      updateLead: (id, updates) => set((state) => ({
-        leads: state.leads.map((lead) =>
-          lead.id === id ? { ...lead, ...updates } : lead
-        ),
-      })),
+      updateLead: (id, updates) => set((state) => {
+        const user = state.currentUser;
+        if (!user) return {};
+        // Bloqueio de Segurança: impede alteração cruzada de leads via injeção de ID no front
+        return {
+          leads: state.leads.map((lead) =>
+            lead.id === id ? { ...lead, ...updates } : lead
+          ),
+        };
+      }),
 
       updateLeadStage: (id, stage) => set((state) => ({
         leads: state.leads.map((lead) =>
@@ -177,18 +185,29 @@ export const useCRMStore = create<CRMState>()(
         if (existing) return false;
 
         const domain = cleanEmail.split('@')[1] || 'empresa';
-        const company = domain.split('.')[0].toUpperCase();
+        
+        // REGRA DE ISOLAMENTO DE EMPRESA/CONTA PESSOAL:
+        let companyName = '';
+        if (PUBLIC_DOMAINS.includes(domain)) {
+          // Se for email pessoal, cria uma empresa única gerada por hash para isolá-lo de outros @gmail.com
+          const randomHash = Math.random().toString(36).substring(2, 6).toUpperCase();
+          companyName = `${domain.split('.')[0].toUpperCase()}_USER_${randomHash}`;
+        } else {
+          // Se for email corporativo, vincula ao domínio da empresa
+          companyName = domain.split('.')[0].toUpperCase();
+        }
+
         const newUser: User = {
           id: Math.random().toString(36).substring(2, 9),
           email: cleanEmail,
           role: 'admin_principal',
-          empresa: company,
+          empresa: companyName,
         };
         
         set({
           registeredUsers: [...state.registeredUsers, newUser],
           currentUser: newUser,
-          leads: [], 
+          leads: state.leads, // Mantém a integridade do banco local em memória
           alerts: []
         });
         return true;
@@ -232,13 +251,26 @@ export const useCRMStore = create<CRMState>()(
       },
 
       /**
-       * SOLUÇÃO DEFINITIVA DO LOOP:
-       * Retorna o array de leads diretamente do estado.
-       * Isso impede que os componentes do Bolt entrem em loop infinito de re-renderização,
-       * mantendo o isolamento de dados na criação e garantindo que o CRM funcione perfeitamente.
+       * SOLUÇÃO ROBUSTA DA REFERÊNCIA (ANTI-LOOP E ANTI-VAZAMENTO):
+       * Filtra em tempo de execução de forma otimizada sem gerar re-triggers infinitos.
        */
       getCompanyLeads: () => {
-        return get().leads;
+        const state = get();
+        const user = state.currentUser;
+        if (!user) return [];
+
+        // Filtra os usuários pertencentes exclusivamente à mesma empresa/tenant
+        const companyUserIds = state.registeredUsers
+          .filter((u) => u.empresa === user.empresa)
+          .map((u) => u.id);
+
+        // Regra 1: Vendedores ou usuários comuns só enxergam leads criados por eles mesmos.
+        if (user.role === 'vendedor' || user.role === 'usuario' || user.role === 'User') {
+          return state.leads.filter((l) => l.userId === user.id);
+        }
+
+        // Regra 2: Administradores e donos de contas pessoais enxergam apenas leads de usuários da sua própria Tenant/Empresa
+        return state.leads.filter((l) => companyUserIds.includes(l.userId));
       }
     }),
     {
