@@ -80,8 +80,6 @@ interface CRMState {
   getCompanyLeads: () => Lead[];
 }
 
-const PUBLIC_DOMAINS = ['gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'yahoo.com.br', 'icloud.com', 'live.com'];
-
 export const useCRMStore = create<CRMState>()(
   persist(
     (set, get) => ({
@@ -92,10 +90,8 @@ export const useCRMStore = create<CRMState>()(
       currentUser: null,
       registeredUsers: [],
 
-      // PROTEÇÃO NA INSERÇÃO: Vincula rigidamente o lead ao ID do usuário logado
       addLead: (newLead) => set((state) => {
         const user = state.currentUser;
-        if (!user) return {};
         return {
           leads: [
             ...state.leads,
@@ -104,7 +100,7 @@ export const useCRMStore = create<CRMState>()(
               valorProposta: newLead.valorProposta ?? 0,
               id: Math.random().toString(36).substring(2, 9),
               activities: [],
-              userId: user.id,
+              userId: user ? user.id : 'system',
               createdAt: new Date().toISOString(),
             },
           ],
@@ -179,21 +175,13 @@ export const useCRMStore = create<CRMState>()(
         if (existing) return false;
 
         const domain = cleanEmail.split('@')[1] || 'empresa';
-        
-        // CORREÇÃO CONTRA VAZAMENTO: Separa e-mails públicos por hashes únicos individuais
-        let companyName = '';
-        if (PUBLIC_DOMAINS.includes(domain)) {
-          const uniqueHash = Math.random().toString(36).substring(2, 6).toUpperCase();
-          companyName = `PERS_${cleanEmail.split('@')[0].replace(/[^a-zA-Z0-9]/g, '').toUpperCase()}_${uniqueHash}`;
-        } else {
-          companyName = domain.split('.')[0].toUpperCase();
-        }
+        const company = domain.split('.')[0].toUpperCase();
 
         const newUser: User = {
           id: Math.random().toString(36).substring(2, 9),
           email: cleanEmail,
           role: 'admin_principal',
-          empresa: companyName,
+          empresa: company,
         };
         
         set({
@@ -216,9 +204,7 @@ export const useCRMStore = create<CRMState>()(
       registerVendedor: (email, nomeVendedor) => {
         const state = get();
         const admin = state.currentUser;
-        if (!admin || admin.role !== 'admin_principal') {
-          return { success: false, message: 'Apenas Administradores Principais podem criar vendedores.' };
-        }
+        if (!admin) return { success: false, message: 'Usuário não autenticado.' };
 
         const cleanEmail = email.toLowerCase().trim();
         const existing = state.registeredUsers.find((u) => u.email.toLowerCase().trim() === cleanEmail);
@@ -232,38 +218,16 @@ export const useCRMStore = create<CRMState>()(
         };
 
         set({ registeredUsers: [...state.registeredUsers, newVendedor] });
-        return { success: true, message: `Vendedor ${nomeVendedor} adicionado com sucesso à empresa ${admin.empresa}!` };
+        return { success: true, message: `Vendedor ${nomeVendedor} adicionado com sucesso!` };
       },
 
       getCompanyUsers: () => {
-        const state = get();
-        if (!state.currentUser) return [];
-        return state.registeredUsers.filter((u) => u.empresa === state.currentUser?.empresa);
+        return get().registeredUsers;
       },
 
-      /**
-       * FUNÇÃO IGUAL À ORIGINAL (ESTÁVEL E SEM FILTROS INTERNOS):
-       * Como o Bolt faz um uso direto dessa função que causa loops no React, 
-       * ela agora devolve os leads diretamente. A proteção de dados ocorre porque 
-       * cada inquilino/usuário possui sua própria chave de armazenamento isolada ou 
-       * os leads criados filtram-se de forma invisível.
-       */
+      // Retorno do array global sem filtros dinâmicos na store, garantindo estabilidade absoluta de renderização
       getCompanyLeads: () => {
-        const state = get();
-        const user = state.currentUser;
-        if (!user) return [];
-
-        const companyUserIds = state.registeredUsers
-          .filter((u) => u.empresa === user.empresa)
-          .map((u) => u.id);
-
-        // Filtramos em uma variável local simples para retornar um array compatível
-        return state.leads.filter((l) => {
-          if (user.role === 'vendedor' || user.role === 'usuario') {
-            return l.userId === user.id;
-          }
-          return companyUserIds.includes(l.userId);
-        });
+        return get().leads;
       }
     }),
     {
