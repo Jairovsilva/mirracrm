@@ -38,6 +38,8 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
     const linkedin = findValue(['linkedin', 'url', 'perfil']);
     const phone = findValue(['telefone', 'celular', 'fixo', 'whatsapp', 'phone', 'mobile']);
     const cnpj = findValue(['cnpj', 'cadastro', 'documento']).replace(/[^0-9]/g, '');
+    const valorRaw = findValue(['valor', 'valorproposta', 'proposta', 'valordeal', 'dealvalue', 'value']);
+    const valorProposta = valorRaw ? Number(valorRaw.replace(/[^0-9.,-]/g, '').replace(/\./g, '').replace(',', '.')) || 0 : 0;
 
     return {
       nome: name || 'Lead Sem Nome',
@@ -49,7 +51,8 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
       nomeEmpresa: company || 'Empresa Não Identificada',
       cnpj: cnpj,
       temperatura: 'frio' as const,
-      stage: 'entrada' as const
+      stage: 'entrada' as const,
+      valorProposta: valorProposta,
     };
   };
 

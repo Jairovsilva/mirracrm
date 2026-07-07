@@ -274,26 +274,26 @@ export const useCRMStore = create<CRMState>()(
       getCompanyLeads: () => {
         const state = get();
         const user = state.currentUser;
-        if (!user) return [];
+        if (!user) return state.leads;
 
         const companyUserIds = state.registeredUsers
           .filter((u) => u.empresa === user.empresa)
           .map((u) => u.id);
 
         if (user.role === 'vendedor' || user.role === 'usuario' || user.role === 'User') {
-          return state.leads.filter((l) => l.userId === user.id);
+          return state.leads.filter((l) => l.userId === user.id || l.userId === 'system' || !l.userId);
         }
 
         if (user.role === 'admin_principal') {
-          return state.leads.filter((l) => 
-            companyUserIds.includes(l.userId) || 
-            l.userId === user.id || 
-            l.userId === 'system' || 
+          return state.leads.filter((l) =>
+            companyUserIds.includes(l.userId) ||
+            l.userId === user.id ||
+            l.userId === 'system' ||
             !l.userId
           );
         }
 
-        return state.leads.filter((l) => companyUserIds.includes(l.userId));
+        return state.leads;
       }
     }),
     {
