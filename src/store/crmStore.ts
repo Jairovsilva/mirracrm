@@ -204,7 +204,7 @@ export const useCRMStore = create<CRMState>()(
         if (existing) return false;
 
         const domain = cleanEmail.split('@')[1] || 'empresa';
-        const company = domain.split('.')[0].charAt(0).toUpperCase() + domain.split('.')[0].slice(1);
+        const company = domain.split('.')[0].toUpperCase();
         const newUser: User = {
           id: Math.random().toString(36).substring(2, 9),
           email: cleanEmail,
@@ -228,7 +228,6 @@ export const useCRMStore = create<CRMState>()(
         if (typeof window !== 'undefined') {
           localStorage.removeItem('crm_current_user');
           localStorage.removeItem('crm_session_active');
-          localStorage.removeItem('corca_crm_storage');
         }
         set({ currentUser: null });
         if (typeof window !== 'undefined') {
@@ -277,14 +276,17 @@ export const useCRMStore = create<CRMState>()(
         const user = state.currentUser;
         if (!user) return [];
 
+        // Coleta IDs de todos os membros que pertencem à mesma empresa do usuário ativo
         const companyUserIds = state.registeredUsers
           .filter((u) => u.empresa === user.empresa)
           .map((u) => u.id);
 
+        // Se for vendedor comum, só vê os dele
         if (user.role === 'vendedor' || user.role === 'usuario' || user.role === 'User') {
           return state.leads.filter((l) => l.userId === user.id);
         }
 
+        // Se for admin, vê os leads de todos os usuários da empresa + os padrão do sistema
         if (user.role === 'admin_principal') {
           return state.leads.filter((l) => 
             companyUserIds.includes(l.userId) || 
@@ -294,12 +296,12 @@ export const useCRMStore = create<CRMState>()(
           );
         }
 
-        return state.leads;
+        return state.leads.filter((l) => companyUserIds.includes(l.userId));
       }
     }),
     {
       name: 'corca_crm_storage',
       storage: createJSONStorage(() => localStorage),
     }
-  )
+  ]
 );
