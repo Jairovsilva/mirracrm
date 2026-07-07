@@ -80,13 +80,51 @@ interface CRMState {
   getCompanyLeads: () => Lead[];
 }
 
+const seedLeads = (): Lead[] => {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: '1', nome: 'Roberto Silva', cargo: 'CEO', emailCorporativo: 'roberto@acme.com',
+      telefoneCelular: '+55 11 99999-0001', telefoneFixo: '', nomeEmpresa: 'Acme Corp',
+      cnpj: '', linkedin: '', stage: 'entrada', temperatura: 'morno',
+      valorProposta: 15000, activities: [], userId: 'system', createdAt: now,
+    },
+    {
+      id: '2', nome: 'Ana Costa', cargo: 'CTO', emailCorporativo: 'ana@techsol.com',
+      telefoneCelular: '+55 11 99999-0002', telefoneFixo: '', nomeEmpresa: 'TechSolutions',
+      cnpj: '', linkedin: '', stage: 'reuniao', temperatura: 'quente',
+      valorProposta: 48000, activities: [], userId: 'system', createdAt: now,
+    },
+  ];
+};
 
+const seedAlerts = (): Alert[] => [
+  { id: 'a1', type: 'warning', message: 'Lead "Ana Costa" está há 5 dias sem contato.', read: false },
+  { id: 'a2', type: 'success', message: 'Negócio de R$ 48.000 movido para Reunião.', read: false },
+  { id: 'a3', type: 'info', message: '2 novos leads importados via Excel.', read: true },
+];
+
+// Comparador estrutural rápido para evitar re-renders infinitos no React
+const areArraysEqual = (a: any[], b: any[]) => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+};
+
+// Cache de referências em memória estática e isolada
+let cachedLeadsInput: any[] = [];
+let cachedUsersInput: any[] = [];
+let cachedCurrentUser: any = null;
+let memoizedLeadsResult: Lead[] = [];
+let memoizedUsersResult: User[] = [];
 
 export const useCRMStore = create<CRMState>()(
   persist(
     (set, get) => ({
-      leads: [],
-      alerts: [],
+      leads: seedLeads(),
+      alerts: seedAlerts(),
       theme: 'dark',
       currentLanguage: 'pt',
       currentUser: null,
@@ -94,7 +132,7 @@ export const useCRMStore = create<CRMState>()(
 
       addLead: (newLead) => set((state) => {
         const currentUser = state.currentUser;
-        if (!currentUser) return {};
+        const userId = currentUser?.id || 'system';
         return {
           leads: [
             ...state.leads,
@@ -103,69 +141,47 @@ export const useCRMStore = create<CRMState>()(
               valorProposta: newLead.valorProposta ?? 0,
               id: Math.random().toString(36).substring(2, 9),
               activities: [],
-              userId: currentUser.id,
+              userId,
               createdAt: new Date().toISOString(),
             },
           ],
         };
       }),
 
-      updateLead: (id, updates) => set((state) => {
-        const user = state.currentUser;
-        if (!user) return {};
-        return {
-          leads: state.leads.map((lead) =>
-            lead.id === id && (lead.userId === user.id || state.registeredUsers.some((u) => u.id === lead.userId && u.empresa === user.empresa && user.role === 'admin_principal'))
-              ? { ...lead, ...updates }
-              : lead
-          ),
-        };
-      }),
+      updateLead: (id, updates) => set((state) => ({
+        leads: state.leads.map((lead) =>
+          lead.id === id ? { ...lead, ...updates } : lead
+        ),
+      })),
 
-      updateLeadStage: (id, stage) => set((state) => {
-        const user = state.currentUser;
-        if (!user) return {};
-        return {
-          leads: state.leads.map((lead) =>
-            lead.id === id && (lead.userId === user.id || state.registeredUsers.some((u) => u.id === lead.userId && u.empresa === user.empresa && user.role === 'admin_principal'))
-              ? { ...lead, stage }
-              : lead
-          ),
-        };
-      }),
+      updateLeadStage: (id, stage) => set((state) => ({
+        leads: state.leads.map((lead) =>
+          lead.id === id ? { ...lead, stage } : lead
+        ),
+      })),
 
-      deleteLead: (id) => set((state) => {
-        const user = state.currentUser;
-        if (!user) return {};
-        return {
-          leads: state.leads.filter((lead) =>
-            !(lead.id === id && (lead.userId === user.id || state.registeredUsers.some((u) => u.id === lead.userId && u.empresa === user.empresa && user.role === 'admin_principal')))
-          ),
-        };
-      }),
+      deleteLead: (id) => set((state) => ({
+        leads: state.leads.filter((lead) => lead.id !== id),
+      })),
 
-      addActivity: (leadId, type, content) => set((state) => {
-        const user = state.currentUser;
-        if (!user) return {};
-        return {
-          leads: state.leads.map((lead) =>
-            lead.id === leadId && (lead.userId === user.id || state.registeredUsers.some((u) => u.id === lead.userId && u.empresa === user.empresa && user.role === 'admin_principal'))
-              ? {
-                  ...lead,
-                  activities: [
-                    ...lead.activities,
-                    {
-                      id: Math.random().toString(36).substring(2, 9),
-                      type,
-                      date: new Date().toISOString(),
-                      content,
-                    },
-                  ],
-                }
-              : lead
-          ),
-        };
-      }),
+      addActivity: (leadId, type, content) => set((state) => ({
+        leads: state.leads.map((lead) =>
+          lead.id === leadId
+            ? {
+                ...lead,
+                activities: [
+                  ...lead.activities,
+                  {
+                    id: Math.random().toString(36).substring(2, 9),
+                    type,
+                    date: new Date().toISOString(),
+                    content,
+                  },
+                ],
+              }
+            : lead
+        ),
+      })),
 
       markAlertRead: (id) => set((state) => ({
         alerts: state.alerts.map((a) => a.id === id ? { ...a, read: true } : a),
@@ -229,6 +245,13 @@ export const useCRMStore = create<CRMState>()(
           localStorage.removeItem('crm_current_user');
           localStorage.removeItem('crm_session_active');
         }
+        // Reseta referências de cache na saída para evitar vazamentos em troca de abas
+        cachedLeadsInput = [];
+        cachedUsersInput = [];
+        cachedCurrentUser = null;
+        memoizedLeadsResult = [];
+        memoizedUsersResult = [];
+        
         set({ currentUser: null });
         if (typeof window !== 'undefined') {
           window.location.reload();
@@ -265,10 +288,27 @@ export const useCRMStore = create<CRMState>()(
         return { success: true, message: `Vendedor ${nomeVendedor} adicionado com sucesso à empresa ${admin.empresa}!` };
       },
 
+      // MEMOIZAÇÃO BLINDADA: Retorna estritamente a mesma referência se os dados de entrada forem idênticos
       getCompanyUsers: () => {
         const state = get();
         if (!state.currentUser) return [];
-        return state.registeredUsers.filter((u) => u.empresa === state.currentUser?.empresa);
+        
+        if (state.registeredUsers === cachedUsersInput && state.currentUser === cachedCurrentUser) {
+          return memoizedUsersResult;
+        }
+
+        const freshFiltered = state.registeredUsers.filter((u) => u.empresa === state.currentUser?.empresa);
+        
+        if (areArraysEqual(freshFiltered, memoizedUsersResult)) {
+          cachedUsersInput = state.registeredUsers;
+          cachedCurrentUser = state.currentUser;
+          return memoizedUsersResult;
+        }
+
+        cachedUsersInput = state.registeredUsers;
+        cachedCurrentUser = state.currentUser;
+        memoizedUsersResult = freshFiltered;
+        return freshFiltered;
       },
 
       getCompanyLeads: () => {
@@ -276,27 +316,65 @@ export const useCRMStore = create<CRMState>()(
         const user = state.currentUser;
         if (!user) return [];
 
+        if (state.leads === cachedLeadsInput && state.registeredUsers === cachedUsersInput && user === cachedCurrentUser) {
+          return memoizedLeadsResult;
+        }
+
         const companyUserIds = state.registeredUsers
           .filter((u) => u.empresa === user.empresa)
           .map((u) => u.id);
 
+        let freshFiltered: Lead[] = [];
+
         if (user.role === 'vendedor' || user.role === 'usuario' || user.role === 'User') {
-          return state.leads.filter((l) => l.userId === user.id);
-        }
-
-        if (user.role === 'admin_principal') {
-          return state.leads.filter((l) =>
-            companyUserIds.includes(l.userId) ||
-            l.userId === user.id
+          freshFiltered = state.leads.filter((l) => l.userId === user.id);
+        } else if (user.role === 'admin_principal') {
+          freshFiltered = state.leads.filter((l) => 
+            companyUserIds.includes(l.userId) || 
+            l.userId === user.id || 
+            l.userId === 'system' || 
+            !l.userId
           );
+        } else {
+          freshFiltered = state.leads.filter((l) => companyUserIds.includes(l.userId));
         }
 
-        return state.leads.filter((l) => l.userId === user.id);
+        if (areArraysEqual(freshFiltered, memoizedLeadsResult)) {
+          cachedLeadsInput = state.leads;
+          cachedUsersInput = state.registeredUsers;
+          cachedCurrentUser = user;
+          return memoizedLeadsResult;
+        }
+
+        cachedLeadsInput = state.leads;
+        cachedUsersInput = state.registeredUsers;
+        cachedCurrentUser = user;
+        memoizedLeadsResult = freshFiltered;
+        return freshFiltered;
       }
     }),
     {
       name: 'corca_crm_storage',
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => ({
+        getItem: (name) => {
+          if (typeof window === 'undefined') return null;
+          const activeUser = localStorage.getItem('crm_current_user');
+          const tenantKey = activeUser ? `${name}_${btoa(activeUser).replace(/=/g, '')}` : name;
+          return localStorage.getItem(tenantKey);
+        },
+        setItem: (name, value) => {
+          if (typeof window === 'undefined') return;
+          const activeUser = localStorage.getItem('crm_current_user');
+          const tenantKey = activeUser ? `${name}_${btoa(activeUser).replace(/=/g, '')}` : name;
+          localStorage.setItem(tenantKey, value);
+        },
+        removeItem: (name) => {
+          if (typeof window === 'undefined') return;
+          const activeUser = localStorage.getItem('crm_current_user');
+          const tenantKey = activeUser ? `${name}_${btoa(activeUser).replace(/=/g, '')}` : name;
+          localStorage.removeItem(tenantKey);
+        }
+      }))
     }
-  )
+  ]
 );
