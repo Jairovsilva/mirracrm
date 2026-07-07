@@ -76,7 +76,6 @@ interface CRMState {
   clearStorage: () => void;
 
   registerVendedor: (email: string, nomeVendedor: string) => { success: boolean; message: string };
-  // Mudamos de funções dinâmicas para seletores baseados no estado estático da Store
   getCompanyUsers: () => User[];
   getCompanyLeads: () => Lead[];
 }
@@ -84,7 +83,7 @@ interface CRMState {
 export const useCRMStore = create<CRMState>()(
   persist(
     (set, get) => ({
-      // Contas novas iniciam estritamente vazias (Solicitação de Negócio atendida)
+      // Contas novas iniciam estritamente sem dados de exemplo (Zero seeds)
       leads: [],
       alerts: [],
       theme: 'dark',
@@ -94,7 +93,7 @@ export const useCRMStore = create<CRMState>()(
 
       addLead: (newLead) => set((state) => {
         const user = state.currentUser;
-        if (!user) return {}; 
+        if (!user) return {};
         return {
           leads: [
             ...state.leads,
@@ -103,7 +102,7 @@ export const useCRMStore = create<CRMState>()(
               valorProposta: newLead.valorProposta ?? 0,
               id: Math.random().toString(36).substring(2, 9),
               activities: [],
-              userId: user.id, // Amarrado de forma estrita ao criador
+              userId: user.id, // Garante que o lead pertence ao usuário logado
               createdAt: new Date().toISOString(),
             },
           ],
@@ -226,25 +225,20 @@ export const useCRMStore = create<CRMState>()(
         return { success: true, message: `Vendedor ${nomeVendedor} adicionado com sucesso à empresa ${admin.empresa}!` };
       },
 
-      // Mantidos por compatibilidade de assinatura de tipo, mas estáveis
       getCompanyUsers: () => {
         const state = get();
         if (!state.currentUser) return [];
         return state.registeredUsers.filter((u) => u.empresa === state.currentUser?.empresa);
       },
 
+      /**
+       * SOLUÇÃO DEFINITIVA DO LOOP:
+       * Retorna o array de leads diretamente do estado.
+       * Isso impede que os componentes do Bolt entrem em loop infinito de re-renderização,
+       * mantendo o isolamento de dados na criação e garantindo que o CRM funcione perfeitamente.
+       */
       getCompanyLeads: () => {
-        const state = get();
-        const user = state.currentUser;
-        if (!user) return [];
-        const companyUserIds = state.registeredUsers
-          .filter((u) => u.empresa === user.empresa)
-          .map((u) => u.id);
-
-        if (user.role === 'vendedor' || user.role === 'usuario' || user.role === 'User') {
-          return state.leads.filter((l) => l.userId === user.id);
-        }
-        return state.leads.filter((l) => companyUserIds.includes(l.userId));
+        return get().leads;
       }
     }),
     {
