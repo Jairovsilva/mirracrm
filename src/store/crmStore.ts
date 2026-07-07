@@ -76,6 +76,7 @@ interface CRMState {
   clearStorage: () => void;
 
   registerVendedor: (email: string, nomeVendedor: string) => { success: boolean; message: string };
+  // Mudamos de funções dinâmicas para seletores baseados no estado estático da Store
   getCompanyUsers: () => User[];
   getCompanyLeads: () => Lead[];
 }
@@ -83,7 +84,7 @@ interface CRMState {
 export const useCRMStore = create<CRMState>()(
   persist(
     (set, get) => ({
-      // Absolutamente NENHUM dado de exemplo por padrão. Contas novas iniciam 100% vazias.
+      // Contas novas iniciam estritamente vazias (Solicitação de Negócio atendida)
       leads: [],
       alerts: [],
       theme: 'dark',
@@ -93,7 +94,7 @@ export const useCRMStore = create<CRMState>()(
 
       addLead: (newLead) => set((state) => {
         const user = state.currentUser;
-        if (!user) return {}; // Bloqueia criação sem usuário logado para evitar vazamento
+        if (!user) return {}; 
         return {
           leads: [
             ...state.leads,
@@ -102,7 +103,7 @@ export const useCRMStore = create<CRMState>()(
               valorProposta: newLead.valorProposta ?? 0,
               id: Math.random().toString(36).substring(2, 9),
               activities: [],
-              userId: user.id, // Amarra estritamente ao ID do usuário atual
+              userId: user.id, // Amarrado de forma estrita ao criador
               createdAt: new Date().toISOString(),
             },
           ],
@@ -188,7 +189,7 @@ export const useCRMStore = create<CRMState>()(
         set({
           registeredUsers: [...state.registeredUsers, newUser],
           currentUser: newUser,
-          leads: [], // Inicia completamente limpo
+          leads: [], 
           alerts: []
         });
         return true;
@@ -225,6 +226,7 @@ export const useCRMStore = create<CRMState>()(
         return { success: true, message: `Vendedor ${nomeVendedor} adicionado com sucesso à empresa ${admin.empresa}!` };
       },
 
+      // Mantidos por compatibilidade de assinatura de tipo, mas estáveis
       getCompanyUsers: () => {
         const state = get();
         if (!state.currentUser) return [];
@@ -235,21 +237,13 @@ export const useCRMStore = create<CRMState>()(
         const state = get();
         const user = state.currentUser;
         if (!user) return [];
-
         const companyUserIds = state.registeredUsers
           .filter((u) => u.empresa === user.empresa)
           .map((u) => u.id);
 
-        // Vendedor só vê os próprios leads
         if (user.role === 'vendedor' || user.role === 'usuario' || user.role === 'User') {
           return state.leads.filter((l) => l.userId === user.id);
         }
-
-        // Admin vê apenas os leads de usuários da mesma empresa (bloqueia completamente dados órfãos ou externos)
-        if (user.role === 'admin_principal') {
-          return state.leads.filter((l) => companyUserIds.includes(l.userId));
-        }
-
         return state.leads.filter((l) => companyUserIds.includes(l.userId));
       }
     }),
