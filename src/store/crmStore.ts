@@ -55,7 +55,7 @@ interface CRMState {
   currentLanguage: Language;
   currentUser: User | null;
   registeredUsers: User[];
-  isHydrated: boolean; // Flag crucial para evitar erros de hidratação no Next.js
+  isHydrated: boolean;
 
   hydrateStore: () => void;
   addLead: (lead: Omit<Lead, 'id' | 'activities' | 'userId' | 'createdAt'>) => void;
@@ -106,15 +106,15 @@ const seedAlerts = (): Alert[] => [
 ];
 
 export const useCRMStore = create<CRMState>((set, get) => ({
-  leads: seedLeads(),
-  alerts: seedAlerts(),
+  // Iniciamos arrays vazios por padrão para evitar incompatibilidades síncronas de SSR
+  leads: [],
+  alerts: [],
   theme: 'dark',
   currentLanguage: 'pt',
   currentUser: null,
   registeredUsers: [],
-  isHydrated: false, // Inicia falso no servidor para o HTML dar match perfeito
+  isHydrated: false,
 
-  // Método executado apenas no client-side para injetar o cache sem estourar o React
   hydrateStore: () => {
     if (typeof window === 'undefined' || get().isHydrated) return;
 
@@ -158,7 +158,7 @@ export const useCRMStore = create<CRMState>((set, get) => ({
       });
     } catch (e) {
       console.error('Erro na hidratação do cliente:', e);
-      set({ isHydrated: true });
+      set({ leads: seedLeads(), alerts: seedAlerts(), isHydrated: true });
     }
   },
 
@@ -370,10 +370,13 @@ export const useCRMStore = create<CRMState>((set, get) => ({
   }
 }));
 
-// Listener reativo isolado para gravação no LocalStorage por Tenant
+// Executa a auto-hidratação IMEDIATAMENTE no lado do navegador, blindando o ciclo do React
 if (typeof window !== 'undefined') {
+  useCRMStore.getState().hydrateStore();
+
+  // Listener reativo isolado para gravação no LocalStorage por Tenant
   useCRMStore.subscribe((state) => {
-    if (!state.isHydrated) return; // Só grava se já tiver recuperado o estado inicial
+    if (!state.isHydrated) return; 
     const activeUser = localStorage.getItem('crm_current_user');
     if (activeUser) {
       const tenantKey = `corca_crm_tenant_${btoa(activeUser).replace(/=/g, '')}`;
