@@ -17,7 +17,7 @@ interface LeadFormModalProps {
 
 export function LeadFormModal({ leadId, onClose }: LeadFormModalProps) {
   const { t } = useTranslation();
-  const leads = useCRMStore((s) => s.leads);
+  const leads = useCRMStore((s) => s.getCompanyLeads());
   const addLead = useCRMStore((s) => s.addLead);
   const updateLead = useCRMStore((s) => s.updateLead);
 

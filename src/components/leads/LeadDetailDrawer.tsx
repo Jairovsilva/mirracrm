@@ -37,7 +37,7 @@ const activityColors: Record<ActivityType, string> = {
 
 export function LeadDetailDrawer({ leadId, onClose, onEdit }: LeadDetailDrawerProps) {
   const { t } = useTranslation();
-  const lead = useCRMStore((s) => s.leads.find((l) => l.id === leadId));
+  const lead = useCRMStore((s) => s.getCompanyLeads().find((l) => l.id === leadId));
   const addActivity = useCRMStore((s) => s.addActivity);
   const deleteLead = useCRMStore((s) => s.deleteLead);
   const [activityType, setActivityType] = useState<ActivityType>('nota');

@@ -55,7 +55,7 @@ export function AIAssistant() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const theme = useCRMStore((s) => s.theme);
-  const leads = useCRMStore((s) => s.leads);
+  const leads = useCRMStore((s) => s.getCompanyLeads());
 
   useEffect(() => {
     if (isOpen) {
