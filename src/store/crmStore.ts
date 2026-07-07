@@ -1,7 +1,6 @@
 'use client';
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 
 export type Stage = 'entrada' | 'enriquecer' | 'reuniao' | 'fim_cadencia';
 export type Temperature = 'frio' | 'morno' | 'quente';
@@ -104,247 +103,280 @@ const seedAlerts = (): Alert[] => [
   { id: 'a3', type: 'info', message: '2 novos leads importados via Excel.', read: true },
 ];
 
-// Utilitário externo para isolar partições no LocalStorage de forma segura e transparente
-const getTenantKey = (baseName: string): string => {
-  if (typeof window === 'undefined') return baseName;
-  const activeUser = localStorage.getItem('crm_current_user');
-  if (!activeUser) return baseName;
-  // Criptografa levemente em Base64 o e-mail do usuário logado para criar uma chave única por empresa
-  return `${baseName}_${btoa(activeUser).replace(/=/g, '')}`;
+// Helper seguro para obter os dados iniciais do localStorage em ambiente Client-side
+const getInitialState = () => {
+  const defaultState = {
+    leads: seedLeads(),
+    alerts: seedAlerts(),
+    theme: 'dark' as Theme,
+    currentLanguage: 'pt' as Language,
+    currentUser: null as User | null,
+    registeredUsers: [] as User[]
+  };
+
+  if (typeof window === 'undefined') return defaultState;
+
+  try {
+    const savedGlobal = localStorage.getItem('corca_crm_global_users');
+    if (savedGlobal) {
+      defaultState.registeredUsers = JSON.parse(savedGlobal);
+    }
+    const activeEmail = localStorage.getItem('crm_current_user');
+    if (activeEmail) {
+      const foundUser = defaultState.registeredUsers.find(
+        (u) => u.email.toLowerCase().trim() === activeEmail.toLowerCase().trim()
+      );
+      if (foundUser) {
+        defaultState.currentUser = foundUser;
+        const tenantKey = `corca_crm_tenant_${btoa(activeEmail).replace(/=/g, '')}`;
+        const savedTenantData = localStorage.getItem(tenantKey);
+        if (savedTenantData) {
+          const parsed = JSON.parse(savedTenantData);
+          defaultState.leads = parsed.leads || seedLeads();
+          defaultState.alerts = parsed.alerts || seedAlerts();
+          defaultState.theme = parsed.theme || 'dark';
+          defaultState.currentLanguage = parsed.currentLanguage || 'pt';
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Erro ao ler estado inicial do localStorage:', e);
+  }
+
+  return defaultState;
 };
 
-export const useCRMStore = create<CRMState>()(
-  persist(
-    (set, get) => ({
-      leads: seedLeads(),
-      alerts: seedAlerts(),
-      theme: 'dark',
-      currentLanguage: 'pt',
-      currentUser: null,
-      registeredUsers: [],
+const initialState = getInitialState();
 
-      addLead: (newLead) => set((state) => {
-        const currentUser = state.currentUser;
-        const userId = currentUser?.id || 'system';
-        return {
-          leads: [
-            ...state.leads,
-            {
-              ...newLead,
-              valorProposta: newLead.valorProposta ?? 0,
-              id: Math.random().toString(36).substring(2, 9),
-              activities: [],
-              userId,
-              createdAt: new Date().toISOString(),
-            },
-          ],
-        };
-      }),
+export const useCRMStore = create<CRMState>((set, get) => ({
+  leads: initialState.leads,
+  alerts: initialState.alerts,
+  theme: initialState.theme,
+  currentLanguage: initialState.currentLanguage,
+  currentUser: initialState.currentUser,
+  registeredUsers: initialState.registeredUsers,
 
-      updateLead: (id, updates) => set((state) => ({
-        leads: state.leads.map((lead) =>
-          lead.id === id ? { ...lead, ...updates } : lead
-        ),
-      })),
+  addLead: (newLead) => set((state) => {
+    const currentUser = state.currentUser;
+    const userId = currentUser?.id || 'system';
+    return {
+      leads: [
+        ...state.leads,
+        {
+          ...newLead,
+          valorProposta: newLead.valorProposta ?? 0,
+          id: Math.random().toString(36).substring(2, 9),
+          activities: [],
+          userId,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    };
+  }),
 
-      updateLeadStage: (id, stage) => set((state) => ({
-        leads: state.leads.map((lead) =>
-          lead.id === id ? { ...lead, stage } : lead
-        ),
-      })),
+  updateLead: (id, updates) => set((state) => ({
+    leads: state.leads.map((lead) =>
+      lead.id === id ? { ...lead, ...updates } : lead
+    ),
+  })),
 
-      deleteLead: (id) => set((state) => ({
-        leads: state.leads.filter((lead) => lead.id !== id),
-      })),
+  updateLeadStage: (id, stage) => set((state) => ({
+    leads: state.leads.map((lead) =>
+      lead.id === id ? { ...lead, stage } : lead
+    ),
+  })),
 
-      addActivity: (leadId, type, content) => set((state) => ({
-        leads: state.leads.map((lead) =>
-          lead.id === leadId
-            ? {
-                ...lead,
-                activities: [
-                  ...lead.activities,
-                  {
-                    id: Math.random().toString(36).substring(2, 9),
-                    type,
-                    date: new Date().toISOString(),
-                    content,
-                  },
-                ],
-              }
-            : lead
-        ),
-      })),
+  deleteLead: (id) => set((state) => ({
+    leads: state.leads.filter((lead) => lead.id !== id),
+  })),
 
-      markAlertRead: (id) => set((state) => ({
-        alerts: state.alerts.map((a) => a.id === id ? { ...a, read: true } : a),
-      })),
-
-      dismissAlert: (id) => set((state) => ({
-        alerts: state.alerts.filter((a) => a.id !== id),
-      })),
-
-      toggleTheme: () => set((state) => ({
-        theme: state.theme === 'dark' ? 'light' : 'dark',
-      })),
-
-      setLanguage: (lang) => set({ currentLanguage: lang }),
-
-      login: (email, _password) => {
-        const state = get();
-        const cleanEmail = email.toLowerCase().trim();
-        const user = state.registeredUsers.find((u) => u.email.toLowerCase().trim() === cleanEmail);
-        
-        if (user) {
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('crm_current_user', user.email);
-            localStorage.setItem('crm_session_active', 'true');
-            
-            // Força a recuperação dos dados específicos deste tenant recém-logado
-            const savedData = localStorage.getItem(`corca_crm_storage_${btoa(user.email).replace(/=/g, '')}`);
-            if (savedData) {
-              try {
-                const parsed = JSON.parse(savedData);
-                if (parsed.state) {
-                  set({
-                    leads: parsed.state.leads || [],
-                    alerts: parsed.state.alerts || [],
-                    theme: parsed.state.theme || 'dark',
-                    currentLanguage: parsed.state.currentLanguage || 'pt'
-                  });
-                }
-              } catch (e) {
-                console.error(e);
-              }
-            }
+  addActivity: (leadId, type, content) => set((state) => ({
+    leads: state.leads.map((lead) =>
+      lead.id === leadId
+        ? {
+            ...lead,
+            activities: [
+              ...lead.activities,
+              {
+                id: Math.random().toString(36).substring(2, 9),
+                type,
+                date: new Date().toISOString(),
+                content,
+              },
+            ],
           }
-          set({ currentUser: user });
-          return true;
-        }
-        return false;
-      },
+        : lead
+    ),
+  })),
 
-      register: (email, _password) => {
-        const state = get();
-        const cleanEmail = email.toLowerCase().trim();
-        const existing = state.registeredUsers.find((u) => u.email.toLowerCase().trim() === cleanEmail);
-        if (existing) return false;
+  markAlertRead: (id) => set((state) => ({
+    alerts: state.alerts.map((a) => a.id === id ? { ...a, read: true } : a),
+  })),
 
-        const domain = cleanEmail.split('@')[1] || 'empresa';
-        const company = domain.split('.')[0].toUpperCase();
-        const newUser: User = {
-          id: Math.random().toString(36).substring(2, 9),
-          email: cleanEmail,
-          role: 'admin_principal',
-          empresa: company,
-        };
+  dismissAlert: (id) => set((state) => ({
+    alerts: state.alerts.filter((a) => a.id !== id),
+  })),
+
+  toggleTheme: () => set((state) => ({
+    theme: state.theme === 'dark' ? 'light' : 'dark',
+  })),
+
+  setLanguage: (lang) => set({ currentLanguage: lang }),
+
+  login: (email, _password) => {
+    const state = get();
+    const cleanEmail = email.toLowerCase().trim();
+    const user = state.registeredUsers.find((u) => u.email.toLowerCase().trim() === cleanEmail);
+    
+    if (user) {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('crm_current_user', user.email);
+        localStorage.setItem('crm_session_active', 'true');
         
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('crm_current_user', newUser.email);
-          localStorage.setItem('crm_session_active', 'true');
+        const tenantKey = `corca_crm_tenant_${btoa(user.email).replace(/=/g, '')}`;
+        const savedTenantData = localStorage.getItem(tenantKey);
+        if (savedTenantData) {
+          try {
+            const parsed = JSON.parse(savedTenantData);
+            set({
+              currentUser: user,
+              leads: parsed.leads || [],
+              alerts: parsed.alerts || [],
+              theme: parsed.theme || 'dark',
+              currentLanguage: parsed.currentLanguage || 'pt'
+            });
+            return true;
+          } catch (e) {
+            console.error(e);
+          }
         }
-
-        set({
-          registeredUsers: [...state.registeredUsers, newUser],
-          currentUser: newUser,
-        });
-        return true;
-      },
-
-      logout: () => {
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('crm_current_user');
-          localStorage.removeItem('crm_session_active');
-        }
-        set({ currentUser: null, leads: seedLeads(), alerts: seedAlerts() });
-        if (typeof window !== 'undefined') {
-          window.location.reload();
-        }
-      },
-
-      clearStorage: () => set({ leads: [], alerts: [] }),
-
-      registerVendedor: (email, nomeVendedor) => {
-        const state = get();
-        const admin = state.currentUser;
-        if (!admin || admin.role !== 'admin_principal') {
-          return { success: false, message: 'Apenas Administradores Principais podem criar vendedores.' };
-        }
-
-        const cleanEmail = email.toLowerCase().trim();
-        const existing = state.registeredUsers.find((u) => u.email.toLowerCase().trim() === cleanEmail);
-        if (existing) return { success: false, message: 'Este e-mail de vendedor já está registrado.' };
-
-        const newVendedor: User = {
-          id: Math.random().toString(36).substring(2, 9),
-          email: cleanEmail,
-          role: 'vendedor',
-          empresa: admin.empresa,
-        };
-
-        set({ registeredUsers: [...state.registeredUsers, newVendedor] });
-        
-        if (typeof window !== 'undefined') {
-          localStorage.setItem(`crm_pwd_${cleanEmail}`, '123456');
-          localStorage.setItem(`crm_name_${cleanEmail}`, nomeVendedor);
-        }
-
-        return { success: true, message: `Vendedor ${nomeVendedor} adicionado com sucesso à empresa ${admin.empresa}!` };
-      },
-
-      getCompanyUsers: () => {
-        const state = get();
-        if (!state.currentUser) return [];
-        return state.registeredUsers.filter((u) => u.empresa === state.currentUser?.empresa);
-      },
-
-      getCompanyLeads: () => {
-        const state = get();
-        const user = state.currentUser;
-        if (!user) return [];
-
-        const companyUserIds = state.registeredUsers
-          .filter((u) => u.empresa === user.empresa)
-          .map((u) => u.id);
-
-        if (user.role === 'vendedor' || user.role === 'usuario' || user.role === 'User') {
-          return state.leads.filter((l) => l.userId === user.id);
-        }
-
-        if (user.role === 'admin_principal') {
-          return state.leads.filter((l) => 
-            companyUserIds.includes(l.userId) || 
-            l.userId === user.id || 
-            l.userId === 'system' || 
-            !l.userId
-          );
-        }
-
-        return state.leads.filter((l) => companyUserIds.includes(l.userId));
       }
-    }),
-    {
-      name: 'corca_crm_storage'
+      set({ currentUser: user, leads: [], alerts: [] });
+      return true;
     }
-  ]
-);
+    return false;
+  },
 
-// Interceptador global seguro executado apenas no Client para gravação Multi-tenant automática
+  register: (email, _password) => {
+    const state = get();
+    const cleanEmail = email.toLowerCase().trim();
+    const existing = state.registeredUsers.find((u) => u.email.toLowerCase().trim() === cleanEmail);
+    if (existing) return false;
+
+    const domain = cleanEmail.split('@')[1] || 'empresa';
+    const company = domain.split('.')[0].toUpperCase();
+    const newUser: User = {
+      id: Math.random().toString(36).substring(2, 9),
+      email: cleanEmail,
+      role: 'admin_principal',
+      empresa: company,
+    };
+    
+    const updatedUsers = [...state.registeredUsers, newUser];
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('corca_crm_global_users', JSON.stringify(updatedUsers));
+      localStorage.setItem('crm_current_user', newUser.email);
+      localStorage.setItem('crm_session_active', 'true');
+    }
+
+    set({
+      registeredUsers: updatedUsers,
+      currentUser: newUser,
+      leads: seedLeads(),
+      alerts: seedAlerts()
+    });
+    return true;
+  },
+
+  logout: () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('crm_current_user');
+      localStorage.removeItem('crm_session_active');
+    }
+    set({ currentUser: null, leads: seedLeads(), alerts: seedAlerts() });
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
+  },
+
+  clearStorage: () => set({ leads: [], alerts: [] }),
+
+  registerVendedor: (email, nomeVendedor) => {
+    const state = get();
+    const admin = state.currentUser;
+    if (!admin || admin.role !== 'admin_principal') {
+      return { success: false, message: 'Apenas Administradores Principais podem criar vendedores.' };
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+    const existing = state.registeredUsers.find((u) => u.email.toLowerCase().trim() === cleanEmail);
+    if (existing) return { success: false, message: 'Este e-mail de vendedor já está registrado.' };
+
+    const newVendedor: User = {
+      id: Math.random().toString(36).substring(2, 9),
+      email: cleanEmail,
+      role: 'vendedor',
+      empresa: admin.empresa,
+    };
+
+    const updatedUsers = [...state.registeredUsers, newVendedor];
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('corca_crm_global_users', JSON.stringify(updatedUsers));
+      localStorage.setItem(`crm_pwd_${cleanEmail}`, '123456');
+      localStorage.setItem(`crm_name_${cleanEmail}`, nomeVendedor);
+    }
+
+    set({ registeredUsers: updatedUsers });
+    return { success: true, message: `Vendedor ${nomeVendedor} adicionado com sucesso à empresa ${admin.empresa}!` };
+  },
+
+  getCompanyUsers: () => {
+    const state = get();
+    if (!state.currentUser) return [];
+    return state.registeredUsers.filter((u) => u.empresa === state.currentUser?.empresa);
+  },
+
+  getCompanyLeads: () => {
+    const state = get();
+    const user = state.currentUser;
+    if (!user) return [];
+
+    const companyUserIds = state.registeredUsers
+      .filter((u) => u.empresa === user.empresa)
+      .map((u) => u.id);
+
+    if (user.role === 'vendedor' || user.role === 'usuario' || user.role === 'User') {
+      return state.leads.filter((l) => l.userId === user.id);
+    }
+
+    if (user.role === 'admin_principal') {
+      return state.leads.filter((l) => 
+        companyUserIds.includes(l.userId) || 
+        l.userId === user.id || 
+        l.userId === 'system' || 
+        !l.userId
+      );
+    }
+
+    return state.leads.filter((l) => companyUserIds.includes(l.userId));
+  }
+}));
+
+// Sincronizador de gravação reativa isolada executado fora da store
 if (typeof window !== 'undefined') {
   useCRMStore.subscribe((state) => {
     const activeUser = localStorage.getItem('crm_current_user');
     if (activeUser) {
-      const tenantKey = `corca_crm_storage_${btoa(activeUser).replace(/=/g, '')}`;
-      const dataToSave = {
-        state: {
-          leads: state.leads,
-          alerts: state.alerts,
-          theme: state.theme,
-          currentLanguage: state.currentLanguage
-        },
-        version: 0
+      const tenantKey = `corca_crm_tenant_${btoa(activeUser).replace(/=/g, '')}`;
+      const tenantData = {
+        leads: state.leads,
+        alerts: state.alerts,
+        theme: state.theme,
+        currentLanguage: state.currentLanguage
       };
-      localStorage.setItem(tenantKey, JSON.stringify(dataToSave));
+      localStorage.setItem(tenantKey, JSON.stringify(tenantData));
     }
   });
 }
