@@ -181,7 +181,6 @@ export const useCRMStore = create<CRMState>()(
 
       setLanguage: (lang) => set({ currentLanguage: lang }),
 
-      // 🛠️ ATUALIZADO: Login limpa resíduos de e-mails antigos e normaliza strings
       login: (email, _password) => {
         const state = get();
         const cleanEmail = email.toLowerCase().trim();
@@ -198,7 +197,6 @@ export const useCRMStore = create<CRMState>()(
         return false;
       },
 
-      // 🛠️ ATUALIZADO: Registro agora isola completamente a nova sessão
       register: (email, _password) => {
         const state = get();
         const cleanEmail = email.toLowerCase().trim();
@@ -226,7 +224,6 @@ export const useCRMStore = create<CRMState>()(
         return true;
       },
 
-      // 🛠️ ATUALIZADO: Logout limpa totalmente chaves manuais e força reset de memória
       logout: () => {
         if (typeof window !== 'undefined') {
           localStorage.removeItem('crm_current_user');
@@ -275,30 +272,29 @@ export const useCRMStore = create<CRMState>()(
         return state.registeredUsers.filter((u) => u.empresa === state.currentUser?.empresa);
       },
 
-      // 🛠️ FIX DEFINITIVO: Regra estrita baseada na tabela e nos prints anexados
       getCompanyLeads: () => {
         const state = get();
         const user = state.currentUser;
         if (!user) return [];
 
-        // Filtra os usuários que pertencem à mesma empresa do usuário logado
         const companyUserIds = state.registeredUsers
           .filter((u) => u.empresa === user.empresa)
           .map((u) => u.id);
 
-        // Se for um vendedor comum ou um usuário recém-criado:
         if (user.role === 'vendedor' || user.role === 'usuario' || user.role === 'User') {
           return state.leads.filter((l) => l.userId === user.id);
         }
 
-        // Se for Admin Principal, ele vê os leads gerados pela equipe da empresa dele
         if (user.role === 'admin_principal') {
           return state.leads.filter((l) => 
-            (companyUserIds.includes(l.userId) || l.userId === user.id) && l.userId !== 'system'
+            companyUserIds.includes(l.userId) || 
+            l.userId === user.id || 
+            l.userId === 'system' || 
+            !l.userId
           );
         }
 
-        return [];
+        return state.leads;
       }
     }),
     {
