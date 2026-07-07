@@ -300,5 +300,5 @@ export const useCRMStore = create<CRMState>()(
       name: 'corca_crm_storage',
       storage: createJSONStorage(() => localStorage),
     }
-  ]
+  )
 );
