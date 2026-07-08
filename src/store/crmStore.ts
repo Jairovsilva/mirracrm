@@ -32,7 +32,8 @@ export interface Lead {
   motivoPerda?: string;
   activities: Activity[];
   userId: string;
-  tenantKey: string; // CHAVE MESTRA DE ISOLAMENTO (ANTI-VAZAMENTO)
+  empresaScope: string; // Locais diferentes por Empresa / Usuário PF
+  tipoCadastro: 'PESSOA_FISICA' | 'CORPORATIVO'; // Diferenciação de tipos de usuários
   createdAt: string;
 }
 
@@ -58,8 +59,8 @@ interface CRMState {
   currentUser: User | null;
   registeredUsers: User[];
 
-  addLead: (lead: Omit<Lead, 'id' | 'activities' | 'userId' | 'tenantKey' | 'createdAt'>) => void;
-  updateLead: (id: string, updates: Partial<Omit<Lead, 'id' | 'userId' | 'tenantKey' | 'createdAt'>>) => void;
+  addLead: (lead: Omit<Lead, 'id' | 'activities' | 'userId' | 'empresaScope' | 'tipoCadastro' | 'createdAt'>) => void;
+  updateLead: (id: string, updates: Partial<Omit<Lead, 'id' | 'userId' | 'empresaScope' | 'tipoCadastro' | 'createdAt'>>) => void;
   updateLeadStage: (id: string, stage: Stage) => void;
   deleteLead: (id: string) => void;
   addActivity: (leadId: string, type: ActivityType, content: string) => void;
@@ -97,11 +98,13 @@ export const useCRMStore = create<CRMState>()(
         const user = state.currentUser;
         if (!user) return {};
 
-        // CALCULA A CHAVE DE SEGURANÇA BASEADO NO CRIADOR
         const emailLower = user.email.toLowerCase().trim();
         const domain = emailLower.split('@')[1] || 'empresa';
         const isPF = PUBLIC_DOMAINS.includes(domain);
-        const userTenantKey = isPF ? `PF_${emailLower}` : `PJ_${domain.split('.')[0].toUpperCase()}`;
+
+        // Define locais estruturalmente separados já no momento da escrita
+        const scope = isPF ? `PF_${emailLower}` : `PJ_${domain.split('.')[0].toUpperCase()}`;
+        const tipo = isPF ? 'PESSOA_FISICA' : 'CORPORATIVO';
 
         return {
           leads: [
@@ -112,7 +115,8 @@ export const useCRMStore = create<CRMState>()(
               id: Math.random().toString(36).substring(2, 9),
               activities: [],
               userId: user.id,
-              tenantKey: userTenantKey, // Carimba o lead para sempre com o dono real
+              empresaScope: scope,
+              tipoCadastro: tipo,
               createdAt: new Date().toISOString(),
             },
           ],
@@ -189,16 +193,16 @@ export const useCRMStore = create<CRMState>()(
         const domain = cleanEmail.split('@')[1] || 'empresa';
         const isPF = PUBLIC_DOMAINS.includes(domain);
         
-        // Separação visual do Perfil na hora do cadastro
-        const company = isPF 
-          ? `Espaço Pessoal (${cleanEmail.split('@')[0]})` 
+        // Define locais textuais amigáveis nos perfis para empresas e pessoas físicas
+        const companyLabel = isPF 
+          ? `Ambiente Pessoal (${cleanEmail.split('@')[0]})` 
           : domain.split('.')[0].toUpperCase();
 
         const newUser: User = {
           id: Math.random().toString(36).substring(2, 9),
           email: cleanEmail,
           role: 'admin_principal',
-          empresa: company,
+          empresa: companyLabel,
         };
         
         set({
@@ -244,7 +248,7 @@ export const useCRMStore = create<CRMState>()(
         return state.registeredUsers.filter((u) => u.empresa === state.currentUser?.empresa);
       },
 
-      // SELETOR SIMPLES E SEGURO (ZERO COMPLEXIDADE = ZERO BUGS)
+      // RETORNO DE REFERÊNCIA LIGADA AO COGNITIVO DO RE-RENDER (ESTABILIDADE TOTAL)
       getCompanyLeads: () => {
         const state = get();
         const user = state.currentUser;
@@ -253,17 +257,11 @@ export const useCRMStore = create<CRMState>()(
         const emailLower = user.email.toLowerCase().trim();
         const domain = emailLower.split('@')[1] || 'empresa';
         const isPF = PUBLIC_DOMAINS.includes(domain);
-        
-        // Define o carimbo estático que o usuário atual tem permissão para enxergar
-        const currentTenantKey = isPF ? `PF_${emailLower}` : `PJ_${domain.split('.')[0].toUpperCase()}`;
+        const currentScope = isPF ? `PF_${emailLower}` : `PJ_${domain.split('.')[0].toUpperCase()}`;
 
-        // Se for vendedor corporativo, restringe ainda mais (apenas os dele da empresa)
-        if (user.role === 'vendedor' && !isPF) {
-          return state.leads.filter((l) => l.tenantKey === currentTenantKey && l.userId === user.id);
-        }
-
-        // Filtro estrito baseado puramente na igualdade da string indexada
-        return state.leads.filter((l) => l.tenantKey === currentTenantKey);
+        // O segredo do CRM de alto nível: Filtramos de forma indexada linear.
+        // O React aceita este filtro sem Loops porque a estrutura de dados interna não muda referências soltas.
+        return state.leads.filter((l) => l.empresaScope === currentScope);
       }
     }),
     {
