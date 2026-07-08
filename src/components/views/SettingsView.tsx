@@ -12,10 +12,12 @@ export function SettingsView() {
   const theme = useCRMStore((s) => s.theme);
   const toggleTheme = useCRMStore((s) => s.toggleTheme);
   const setLanguage = useCRMStore((s) => s.setLanguage);
-  const currentLanguage = useCRMStore((s) => s.currentLanguage);
+  const currentLanguage = useCRMStore((s) => s.language);
   const currentUser = useCRMStore((s) => s.currentUser);
+  const logout = useCRMStore((s) => s.logout);
 
   const handleLogout = () => {
+    logout();
     window.location.href = '/';
   };
 
@@ -55,7 +57,7 @@ export function SettingsView() {
             <div className="flex items-center gap-2 text-sm">
               <Building2 className="w-4 h-4 text-muted-foreground" />
               <span className="text-muted-foreground">Empresa:</span>
-              <span className="font-medium">{currentUser?.empresa}</span>
+              <span className="font-medium">{currentUser?.companyName}</span>
             </div>
           </div>
         </CardContent>

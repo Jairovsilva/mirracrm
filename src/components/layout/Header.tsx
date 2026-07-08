@@ -19,7 +19,7 @@ export function Header({ onAddLead, onToggleAlerts, showAlerts }: HeaderProps) {
   const theme = useCRMStore((s) => s.theme);
   const toggleTheme = useCRMStore((s) => s.toggleTheme);
   const setLanguage = useCRMStore((s) => s.setLanguage);
-  const currentLanguage = useCRMStore((s) => s.currentLanguage);
+  const currentLanguage = useCRMStore((s) => s.language);
   const alerts = useCRMStore((s) => s.alerts);
   const currentUser = useCRMStore((s) => s.currentUser);
   const [langOpen, setLangOpen] = useState(false);

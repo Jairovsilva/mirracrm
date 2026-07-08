@@ -12,14 +12,14 @@ interface KanbanViewProps {
 
 export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: KanbanViewProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { addLead, updateLeadStage, deleteLead, theme, getCompanyLeads } = useCRMStore();
+  const { addLead, moveLead, deleteLead, theme, leads } = useCRMStore();
   const [isProcessing, setIsProcessing] = useState(false);
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<Stage | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
   // 🎯 FILTRO CORRIGIDO: Utiliza a inteligência de escopo nativa da Store por Empresa/Usuário
-  const myLeads = getCompanyLeads();
+  const myLeads = leads;
 
   const mapRowToLead = (row: any) => {
     const keys = Object.keys(row);
@@ -133,7 +133,7 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
     e.preventDefault();
     const leadId = e.dataTransfer.getData('text/plain') || draggedLeadId;
     if (leadId) {
-      updateLeadStage(leadId, columnId);
+      moveLead(leadId, columnId);
     }
     setDraggedLeadId(null);
     setDragOverColumn(null);

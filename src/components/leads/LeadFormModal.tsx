@@ -17,7 +17,7 @@ interface LeadFormModalProps {
 
 export function LeadFormModal({ leadId, onClose }: LeadFormModalProps) {
   const { t } = useTranslation();
-  const leads = useCRMStore((s) => s.getCompanyLeads());
+  const leads = useCRMStore((s) => s.leads);
   const addLead = useCRMStore((s) => s.addLead);
   const updateLead = useCRMStore((s) => s.updateLead);
 
@@ -71,7 +71,7 @@ export function LeadFormModal({ leadId, onClose }: LeadFormModalProps) {
       cnpj: form.cnpj,
       temperatura: form.temperatura,
       stage: form.stage,
-      valorProposta: form.valorProposta ? Number(form.valorProposta) : undefined,
+      valorProposta: form.valorProposta ? Number(form.valorProposta) : 0,
       motivoPerda: form.motivoPerda || undefined,
     };
 

@@ -9,21 +9,26 @@ export default function LandingPage({ onAuthSuccess }: { onAuthSuccess: () => vo
   const login = useCRMStore((s) => s.login);
   const register = useCRMStore((s) => s.register);
   const [isLoginTab, setIsLoginTab] = useState(true);
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
     if (isLoginTab) {
-      const success = login(email, password);
-      if (success) onAuthSuccess();
+      const result = await login(email, password);
+      if (result.ok) onAuthSuccess();
+      else setError(result.error || 'Credenciais incorretas.');
     } else {
-      const success = register(email, password);
-      if (success) onAuthSuccess();
+      const result = await register(email, password, name || email.split('@')[0]);
+      if (result.ok) onAuthSuccess();
+      else setError(result.error || 'Erro ao cadastrar.');
     }
   };
 
-  const handleSSOAuth = (providerName: string, defaultEmail: string) => {
+  const handleSSOAuth = async (providerName: string, defaultEmail: string) => {
     const userEmail = prompt(`[OAuth Integration] Insira seu e-mail corporativo para autenticação via ${providerName}:`, defaultEmail);
     if (!userEmail) return;
 
@@ -38,12 +43,13 @@ export default function LandingPage({ onAuthSuccess }: { onAuthSuccess: () => vo
     const userPassword = prompt(`Insira uma senha para criptografar suas credenciais de segurança do workspace ${domain.split('.')[0].toUpperCase()}:`, 'senha123');
     if (!userPassword) return;
 
-    const registered = register(userEmail, userPassword);
-    if (registered) {
+    const userName = domain.split('.')[0];
+    const registered = await register(userEmail, userPassword, userName);
+    if (registered.ok) {
       onAuthSuccess();
     } else {
-      const loggedIn = login(userEmail, userPassword);
-      if (loggedIn) onAuthSuccess();
+      const loggedIn = await login(userEmail, userPassword);
+      if (loggedIn.ok) onAuthSuccess();
     }
   };
 
@@ -130,6 +136,25 @@ export default function LandingPage({ onAuthSuccess }: { onAuthSuccess: () => vo
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-600 rounded-xl text-xs font-semibold text-center">
+                {error}
+              </div>
+            )}
+            {!isLoginTab && (
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">Nome Completo</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: João Silva"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  className="w-full mt-1.5 p-3 rounded-xl bg-neutral-50 border border-neutral-200 text-sm text-neutral-900 placeholder-neutral-400 focus:outline-none focus:border-indigo-600 focus:bg-white transition"
+                />
+              </div>
+            )}
+
             <div>
               <label className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">Endereço de E-mail</label>
               <input

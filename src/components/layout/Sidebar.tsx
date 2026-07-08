@@ -33,48 +33,13 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
   const { t } = useTranslation();
 
   const storeCurrentUser = useCRMStore((s) => s.currentUser);
+  const logout = useCRMStore((s) => s.logout);
 
-  
-
-  // Estado local para garantir sincronismo em tempo real com o localStorage
-
-  const [displayUser, setDisplayUser] = useState({
-
-    email: storeCurrentUser?.email || 'jairo@ainglobal.com.br',
-
-    empresa: storeCurrentUser?.empresa || 'AINGLOBAL',
-
-    role: storeCurrentUser?.role || 'admin_principal'
-
-  });
-
-
-
-  // 🔄 Efeito cirúrgico para capturar o usuário real logado no localStorage
-
-  useEffect(() => {
-
-    if (typeof window !== 'undefined') {
-
-      const activeUserEmail = localStorage.getItem('crm_current_user');
-
-      if (activeUserEmail) {
-
-        setDisplayUser({
-
-          email: activeUserEmail,
-
-          empresa: activeUserEmail.includes('ainglob') ? 'AINGLOBAL' : 'Workspace Pessoal',
-
-          role: activeUserEmail.includes('ainglob') ? 'admin_principal' : 'usuário'
-
-        });
-
-      }
-
-    }
-
-  }, [storeCurrentUser]);
+  const displayUser = {
+    email: storeCurrentUser?.email || 'usuario@exemplo.com',
+    companyName: storeCurrentUser?.companyName || 'Workspace Pessoal',
+    role: storeCurrentUser?.role || 'owner',
+  };
 
 
 
@@ -97,21 +62,8 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
 
 
   const handleLogout = () => {
-
-    if (typeof window !== 'undefined') {
-
-      localStorage.removeItem('crm_session_active');
-
-      localStorage.removeItem('crm_current_user');
-
-      localStorage.removeItem('user_email');
-
-      localStorage.removeItem('email');
-
-      window.location.href = '/';
-
-    }
-
+    logout();
+    window.location.href = '/';
   };
 
 
@@ -142,7 +94,7 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
 
           <h1 className="font-bold text-sm text-sidebar-foreground">{t.appName}</h1>
 
-          <p className="text-xs text-muted-foreground">{displayUser.empresa}</p>
+          <p className="text-xs text-muted-foreground">{displayUser.companyName}</p>
 
         </div>
 

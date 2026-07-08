@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useCRMStore, restoreSession } from '@/store/useCRMStore';
+import { useCRMStore, restoreSession } from '@/src/store/crmStore';
 
 interface AuthGuardProps {
   children: React.ReactNode;
@@ -13,7 +13,6 @@ export function AuthGuard({ children, fallback }: AuthGuardProps) {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    // Only restore session if not already logged in
     if (currentUser) {
       setChecking(false);
       return;
@@ -38,28 +37,4 @@ export function AuthGuard({ children, fallback }: AuthGuardProps) {
   }
 
   return <>{children}</>;
-}
-
-📁 Arquivo: components/DailyAutomation.tsx
-
-Componente novo — executa as automações diárias. Cole em components/DailyAutomation.tsx.
-
-typescript'use client';
-
-import { useEffect } from 'react';
-import { useCRMStore, runDailyAlertAutomation } from '@/store/useCRMStore';
-
-export function DailyAutomation() {
-  const currentUser = useCRMStore(s => s.currentUser);
-
-  useEffect(() => {
-    if (!currentUser) return;
-    // Run after a short delay to not block render
-    const timer = setTimeout(() => {
-      runDailyAlertAutomation();
-    }, 2000);
-    return () => clearTimeout(timer);
-  }, [currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return null; // invisible component
 }

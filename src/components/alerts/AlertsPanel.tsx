@@ -3,17 +3,18 @@
 import { useTranslation } from '@/src/lib/useTranslation';
 import { useCRMStore } from '@/src/store/crmStore';
 import { Button } from '@/components/ui/button';
-import { X, Bell, Info, AlertTriangle, CheckCircle2, Check, Trash2 } from 'lucide-react';
+import { X, Bell, Info, AlertTriangle, CheckCircle2, Check, Trash2, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface AlertsPanelProps {
   onClose: () => void;
 }
 
-const alertConfig = {
+const alertConfig: Record<'info' | 'warning' | 'success' | 'danger', { icon: typeof Info; classes: string }> = {
   info: { icon: Info, classes: 'bg-blue-100 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400' },
   warning: { icon: AlertTriangle, classes: 'bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400' },
   success: { icon: CheckCircle2, classes: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400' },
+  danger: { icon: AlertCircle, classes: 'bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400' },
 };
 
 export function AlertsPanel({ onClose }: AlertsPanelProps) {

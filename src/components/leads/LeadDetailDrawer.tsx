@@ -11,7 +11,7 @@ import { TemperatureBadge } from '@/src/components/leads/TemperatureBadge';
 import { StageBadge } from '@/src/components/leads/StageBadge';
 import {
   X, Mail, Phone, PhoneCall, Building2, Linkedin, Briefcase, FileText, DollarSign,
-  Pencil, Trash2, Calendar, StickyNote, Send, Clock,
+  Pencil, Trash2, Calendar, StickyNote, Send, Clock, MessageCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -26,6 +26,8 @@ const activityIcons: Record<ActivityType, typeof Phone> = {
   email: Mail,
   reuniao: Calendar,
   nota: StickyNote,
+  whatsapp: MessageCircle,
+  linkedin: Linkedin,
 };
 
 const activityColors: Record<ActivityType, string> = {
@@ -33,11 +35,13 @@ const activityColors: Record<ActivityType, string> = {
   email: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400',
   reuniao: 'bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400',
   nota: 'bg-slate-100 text-slate-600 dark:bg-slate-500/15 dark:text-slate-400',
+  whatsapp: 'bg-green-100 text-green-600 dark:bg-green-500/15 dark:text-green-400',
+  linkedin: 'bg-sky-100 text-sky-600 dark:bg-sky-500/15 dark:text-sky-400',
 };
 
 export function LeadDetailDrawer({ leadId, onClose, onEdit }: LeadDetailDrawerProps) {
   const { t } = useTranslation();
-  const lead = useCRMStore((s) => s.getCompanyLeads().find((l) => l.id === leadId));
+  const lead = useCRMStore((s) => s.leads.find((l) => l.id === leadId));
   const addActivity = useCRMStore((s) => s.addActivity);
   const deleteLead = useCRMStore((s) => s.deleteLead);
   const [activityType, setActivityType] = useState<ActivityType>('nota');

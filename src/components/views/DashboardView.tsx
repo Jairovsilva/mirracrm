@@ -22,11 +22,10 @@ export function DashboardView({ onOpenLead, onAddLead, onViewKanban }: Dashboard
   const { t } = useTranslation();
   
   // 🔒 SEGURANÇA MÁXIMA: Puxamos a função de escopo corporativo e o usuário logado do Zustand
-  const getCompanyLeads = useCRMStore((s) => s.getCompanyLeads);
+  const leads = useCRMStore((s) => s.leads);
   const currentUser = useCRMStore((s) => s.currentUser);
-  
-  // Obtém exclusivamente os leads isolados da empresa atual
-  const myLeads = getCompanyLeads();
+
+  const myLeads = leads;
 
   // 📊 Métricas baseadas unicamente no escopo isolado correto
   const totalLeads = myLeads.length;

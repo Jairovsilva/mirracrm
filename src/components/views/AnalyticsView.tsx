@@ -11,10 +11,7 @@ import { TrendingUp, Users, Target, DollarSign, Activity as ActivityIcon } from 
 
 export function AnalyticsView() {
   const { t } = useTranslation();
-  const getCompanyLeads = useCRMStore((s) => s.getCompanyLeads);
-
-  // 🎯 FILTRO DE SEGURANÇA CORRIGIDO: Alinha os dados do Analytics rigorosamente com a empresa/usuário atual
-  const leads = getCompanyLeads();
+  const leads = useCRMStore((s) => s.leads);
 
   const stageData = [
     { name: t.stages.entrada, value: leads.filter((l) => l.stage === 'entrada').length, color: 'hsl(var(--chart-1))' },

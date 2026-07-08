@@ -19,14 +19,12 @@ interface LeadsViewProps {
 
 export function LeadsView({ onOpenLead, onAddLead, onEditLead }: LeadsViewProps) {
   const { t } = useTranslation();
-  const getCompanyLeads = useCRMStore((s) => s.getCompanyLeads);
+  const leads = useCRMStore((s) => s.leads);
   const deleteLead = useCRMStore((s) => s.deleteLead);
   const [search, setSearch] = useState('');
   const [filterStage, setFilterStage] = useState<Stage | 'all'>('all');
   const [filterTemp, setFilterTemp] = useState<Temperature | 'all'>('all');
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
-
-  const leads = getCompanyLeads();
 
   const filteredLeads = useMemo(() => {
     return leads.filter((l) => {

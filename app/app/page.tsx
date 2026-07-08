@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useCRMStore } from '@/src/store/crmStore';
+import { useCRMStore, restoreSession, runDailyAlertAutomation } from '@/src/store/crmStore';
 import { Sidebar } from '@/src/components/layout/Sidebar';
 import { Header } from '@/src/components/layout/Header';
 import { DashboardView } from '@/src/components/views/DashboardView';
@@ -30,14 +30,15 @@ export default function AppPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const session = localStorage.getItem('crm_session_active');
-    if (!session) {
-      window.location.href = '/';
-      return;
-    }
-
-    setIsAuthorized(true);
-    setIsLoading(false);
+    restoreSession().then((restored) => {
+      if (restored) {
+        setIsAuthorized(true);
+        setIsLoading(false);
+        runDailyAlertAutomation();
+      } else {
+        window.location.href = '/';
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -53,14 +54,11 @@ export default function AppPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const handleLogout = () => {
-      localStorage.removeItem('crm_session_active');
+    const handleLogoutEvent = () => {
+      useCRMStore.getState().logout();
       window.location.href = '/';
     };
 
-    window.logout = handleLogout;
-
-    const handleLogoutEvent = () => handleLogout();
     window.addEventListener('crm_logout_trigger', handleLogoutEvent);
     return () => window.removeEventListener('crm_logout_trigger', handleLogoutEvent);
   }, []);
