@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useCRMStore, runDailyAlertAutomation } from '@/store/useCRMStore';
+import { useCRMStore, runDailyAlertAutomation } from '../src/store/crmStore';
 
 export function DailyAutomation() {
   const currentUser = useCRMStore(s => s.currentUser);
