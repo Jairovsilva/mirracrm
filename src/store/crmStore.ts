@@ -47,6 +47,7 @@ export interface User {
   email: string;
   role: string;
   empresa: string;
+  tipoConta: 'PF' | 'PJ';
 }
 
 interface CRMState {
@@ -79,6 +80,8 @@ interface CRMState {
   getCompanyUsers: () => User[];
   getCompanyLeads: () => Lead[];
 }
+
+const PUBLIC_DOMAINS = ['gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'yahoo.com.br', 'icloud.com', 'live.com', 'uol.com.br', 'bol.com.br'];
 
 export const useCRMStore = create<CRMState>()(
   persist(
@@ -157,44 +160,98 @@ export const useCRMStore = create<CRMState>()(
       setLanguage: (lang) => set({ currentLanguage: lang }),
 
       login: (email, _password) => {
-        const state = get();
         const cleanEmail = email.toLowerCase().trim();
-        const user = state.registeredUsers.find((u) => u.email.toLowerCase().trim() === cleanEmail);
+        const domain = cleanEmail.split('@')[1] || '';
+        const isPF = PUBLIC_DOMAINS.includes(domain);
         
-        if (user) {
-          set({ currentUser: user });
+        // Ativa dinamicamente o identificador único da gaveta deste usuário/empresa
+        const tenantKey = isPF 
+          ? `corca_crm_tenant_pf_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '')}`
+          : `corca_crm_tenant_pj_${domain.split('.')[0].toUpperCase()}`;
+
+        if (typeof window !== 'undefined') {
+          const storedData = localStorage.getItem(tenantKey);
+          if (storedData) {
+            try {
+              const parsed = JSON.parse(storedData);
+              const targetUser = parsed.state?.registeredUsers?.find(
+                (u: any) => u.email.toLowerCase().trim() === cleanEmail
+              );
+
+              if (targetUser) {
+                // Seleciona a partição exclusiva e reconstrói o estado imediatamente
+                localStorage.setItem('corca_crm_active_tenant_key', tenantKey);
+                set({
+                  currentUser: targetUser,
+                  registeredUsers: parsed.state.registeredUsers || [],
+                  leads: parsed.state.leads || [],
+                  alerts: parsed.state.alerts || []
+                });
+                return true;
+              }
+            } catch (e) {
+              console.error(e);
+            }
+          }
+        }
+
+        // Fallback global legível para transição suave
+        const state = get();
+        const globalUser = state.registeredUsers.find((u) => u.email.toLowerCase().trim() === cleanEmail);
+        if (globalUser) {
+          set({ currentUser: globalUser });
           return true;
         }
         return false;
       },
 
       register: (email, _password) => {
-        const state = get();
         const cleanEmail = email.toLowerCase().trim();
-        const existing = state.registeredUsers.find((u) => u.email.toLowerCase().trim() === cleanEmail);
-        if (existing) return false;
-
         const domain = cleanEmail.split('@')[1] || 'empresa';
-        const company = domain.split('.')[0].toUpperCase();
+        const isPF = PUBLIC_DOMAINS.includes(domain);
+
+        let companyName = '';
+        let tipo: 'PF' | 'PJ' = 'PJ';
+
+        if (isPF) {
+          // Geração de ID amigável de exibição interna de Pessoa Física (Garante gaveta individual)
+          companyName = `CONTA_PESSOAL_${cleanEmail.split('@')[0].toUpperCase()}`;
+          tipo = 'PF';
+        } else {
+          companyName = domain.split('.')[0].toUpperCase();
+          tipo = 'PJ';
+        }
 
         const newUser: User = {
           id: Math.random().toString(36).substring(2, 9),
           email: cleanEmail,
           role: 'admin_principal',
-          empresa: company,
+          empresa: companyName,
+          tipoConta: tipo
         };
-        
+
+        const tenantKey = isPF 
+          ? `corca_crm_tenant_pf_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '')}`
+          : `corca_crm_tenant_pj_${companyName}`;
+
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('corca_crm_active_tenant_key', tenantKey);
+        }
+
         set({
-          registeredUsers: [...state.registeredUsers, newUser],
+          registeredUsers: [newUser],
           currentUser: newUser,
+          leads: [], 
           alerts: []
         });
+
         return true;
       },
 
       logout: () => {
         set({ currentUser: null });
         if (typeof window !== 'undefined') {
+          localStorage.removeItem('corca_crm_active_tenant_key');
           window.location.reload();
         }
       },
@@ -215,28 +272,54 @@ export const useCRMStore = create<CRMState>()(
           email: cleanEmail,
           role: 'vendedor',
           empresa: admin.empresa,
+          tipoConta: admin.tipoConta
         };
 
         set({ registeredUsers: [...state.registeredUsers, newVendedor] });
-        return { success: true, message: `Vendedor ${nomeVendedor} adicionado com sucesso!` };
+        return { success: true, message: `Vendedor ${nomeVendedor} adicionado com sucesso à organização!` };
       },
 
       getCompanyUsers: () => {
         return get().registeredUsers;
       },
 
-      // Retorno do array global sem filtros dinâmicos na store, garantindo estabilidade absoluta de renderização
+      // RETORNO PURE ARRAY ESTÁTICO (ANTI-LOOP):
+      // Isolado nativamente pelo interceptor do Storage na inicialização.
       getCompanyLeads: () => {
-        return get().leads;
+        const state = get();
+        const user = state.currentUser;
+        if (!user) return [];
+        
+        // Vendedores enxergam apenas seus leads dentro da base já segregada fisicamente
+        if (user.role === 'vendedor') {
+          return state.leads.filter((l) => l.userId === user.id);
+        }
+        return state.leads;
       }
     }),
     {
       name: 'corca_crm_storage',
-      storage: createJSONStorage(() => (typeof window !== 'undefined' ? localStorage : {
-        getItem: () => null,
-        setItem: () => {},
-        removeItem: () => {},
-      })),
+      storage: createJSONStorage(() => {
+        if (typeof window === 'undefined') {
+          return { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+        }
+        
+        // Interceptador arquitetural estrito: isola chaves físicas no localStorage por Tenant
+        return {
+          getItem: (name) => {
+            const activeTenant = localStorage.getItem('corca_crm_active_tenant_key');
+            return localStorage.getItem(activeTenant || name);
+          },
+          setItem: (name, value) => {
+            const activeTenant = localStorage.getItem('corca_crm_active_tenant_key');
+            localStorage.setItem(activeTenant || name, value);
+          },
+          removeItem: (name) => {
+            const activeTenant = localStorage.getItem('corca_crm_active_tenant_key');
+            localStorage.removeItem(activeTenant || name);
+          }
+        };
+      }),
     }
   )
 );
