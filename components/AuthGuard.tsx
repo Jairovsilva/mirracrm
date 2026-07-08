@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useCRMStore, restoreSession } from '@/store/useCRMStore';
+import { useCRMStore, restoreSession } from '../src/store/crmStore';
 
 interface AuthGuardProps {
   children: React.ReactNode;
