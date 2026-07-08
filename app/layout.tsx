@@ -1,8 +1,6 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
-import { AuthGuard } from '@/components/AuthGuard';
-import { DailyAutomation } from '@/components/DailyAutomation';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -35,10 +33,7 @@ export default function RootLayout({
         />
       </head>
       <body className={inter.className} suppressHydrationWarning>
-        <AuthGuard>
-          <DailyAutomation />
-          {children}
-        </AuthGuard>
+        {children}
       </body>
     </html>
   );
