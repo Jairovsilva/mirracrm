@@ -8,12 +8,11 @@ export function DailyAutomation() {
 
   useEffect(() => {
     if (!currentUser) return;
-    // Run after a short delay to not block render
     const timer = setTimeout(() => {
       runDailyAlertAutomation();
     }, 2000);
     return () => clearTimeout(timer);
-  }, [currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentUser?.id]);
 
-  return null; // invisible component
+  return null;
 }
