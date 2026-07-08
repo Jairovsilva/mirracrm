@@ -13,14 +13,11 @@ export function AuthGuard({ children, fallback }: AuthGuardProps) {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    // Only restore session if not already logged in
-    if (currentUser) {
-      setChecking(false);
-      return;
+    if (!currentUser) {
+      restoreSession();
     }
-
-    restoreSession().finally(() => setChecking(false));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    setChecking(false);
+  }, []);
 
   if (checking) {
     return (
