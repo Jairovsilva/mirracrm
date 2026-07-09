@@ -1,835 +1,321 @@
 'use client';
+import React, { useRef, useState } from 'react';
+import { useCRMStore, type Stage } from '@/src/store/crmStore';
+import { FileSpreadsheet, Trash2, GripVertical, Search, X } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
-/**
- * CorçaCRM — Store v3 (Bolt-safe, Zero Data Leak)
- *
- * ARQUITETURA:
- * - Nenhum dado de usuário diferente compartilha o mesmo espaço de memória
- * - Chaves de storage são compostas: prefixo::namespace::id
- * - currentUser é derivado de sessionKey (não de cache de estado)
- * - PF (pessoa física) e PJ (corporativo) têm namespaces estruturalmente diferentes
- * - Sem race condition: reads e writes usam a mesma função de derivação de escopo
- */
-
-import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-export type Stage = 'entrada' | 'enriquecer' | 'reuniao' | 'fim_cadencia';
-export type Temperature = 'frio' | 'morno' | 'quente';
-export type ActivityType = 'telefone' | 'email' | 'reuniao' | 'nota' | 'whatsapp' | 'linkedin';
-export type Theme = 'light' | 'dark';
-export type Language = 'pt' | 'en' | 'es';
-export type AccountType = 'PF' | 'PJ';
-export type UserRole = 'owner' | 'admin' | 'vendedor';
-
-export interface Activity {
-  id: string;
-  type: ActivityType;
-  date: string;
-  content: string;
-  userId: string;
+interface KanbanViewProps {
+  onOpenLead: (id: string) => void;
+  onAddLead: () => void;
+  onEditLead: (id: string) => void;
 }
 
-export interface Lead {
-  id: string;
-  nome: string;
-  cargo: string;
-  emailCorporativo: string;
-  telefoneCelular: string;
-  telefoneFixo: string;
-  nomeEmpresa: string;
-  cnpj: string;
-  linkedin: string;
-  stage: Stage;
-  temperatura: Temperature;
-  valorProposta: number;
-  probabilidade: number;
-  motivoPerda?: string;
-  motivoSemReuniao?: string;
-  activities: Activity[];
-  // Chave imutável derivada no momento da criação — nunca muda
-  readonly scopeKey: string;
-  readonly createdByUserId: string;
-  readonly createdAt: string;
-  updatedAt: string;
-}
+export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: KanbanViewProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { addLead, moveLead, deleteLead, theme, leads } = useCRMStore();
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
+  const [dragOverColumn, setDragOverColumn] = useState<Stage | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
-export interface UserProfile {
-  id: string;
-  email: string;
-  name: string;
-  role: UserRole;
-  accountType: AccountType;
-  // Chave de escopo derivada do email — nunca muda após criação
-  readonly scopeKey: string;
-  // Para PJ: todos da mesma empresa compartilham este scopeKey
-  // Para PF: scopeKey é único por email
-  companyName: string;
-  createdAt: string;
-}
+  // 🎯 FILTRO CORRIGIDO: Utiliza a inteligência de escopo nativa da Store por Empresa/Usuário
+  const myLeads = leads;
 
-export interface Alert {
-  id: string;
-  type: 'info' | 'warning' | 'success' | 'danger';
-  title: string;
-  message: string;
-  read: boolean;
-  leadId?: string;
-  createdAt: string;
-}
+  const mapRowToLead = (row: any) => {
+    const keys = Object.keys(row);
 
-export interface UIPrefs {
-  theme: Theme;
-  language: Language;
-  sidebarOpen: boolean;
-}
+    // Remove acentos corretamente (NFD) antes de limpar caracteres especiais.
+    // Isso evita que "Razão Social" vire "razosocial" em vez de "razaosocial".
+    const normalize = (str: string) =>
+      str
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') // remove acentos (ã, ç, é, etc.)
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]/g, '');
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+    const findValue = (possibleNames: string[]) => {
+      const normalizedNames = possibleNames.map(normalize);
 
-const FREE_EMAIL_DOMAINS = new Set([
-  'gmail.com', 'googlemail.com',
-  'outlook.com', 'hotmail.com', 'hotmail.com.br', 'live.com', 'msn.com',
-  'yahoo.com', 'yahoo.com.br', 'yahoo.co.uk',
-  'icloud.com', 'me.com', 'mac.com',
-  'uol.com.br', 'bol.com.br', 'terra.com.br', 'ig.com.br',
-  'r7.com', 'globomail.com',
-  'protonmail.com', 'proton.me', 'tutanota.com',
-  'aol.com', 'zoho.com', 'yandex.com',
-  'mail.com', 'gmx.com', 'gmx.net',
-  'tempmail.com', 'guerrillamail.com',
-]);
+      // 1) tenta bater exatamente com o header normalizado
+      let foundKey = keys.find((k) => normalizedNames.includes(normalize(k)));
 
-const STAGE_PROBABILITY: Record<Stage, number> = {
-  entrada: 0.05,
-  enriquecer: 0.15,
-  reuniao: 0.40,
-  fim_cadencia: 0.70,
-};
+      // 2) fallback: aceita correspondência parcial (contém)
+      //    cobre casos como "Nome Completo", "Cargo/Função", "Telefone Celular"
+      if (!foundKey) {
+        foundKey = keys.find((k) => {
+          const nk = normalize(k);
+          return normalizedNames.some((name) => nk.includes(name) || name.includes(nk));
+        });
+      }
 
-// ─── Scope Key derivation (pure function — deterministic) ─────────────────────
-
-/**
- * REGRA CENTRAL: scopeKey é derivado SEMPRE da mesma forma.
- * PF → "PF::email@dominio.com"   (isolamento individual)
- * PJ → "PJ::dominio.com"         (compartilhado pela empresa)
- *
- * Esta função é pura e não depende de nenhum estado.
- */
-export function deriveScopeKey(email: string): { scopeKey: string; accountType: AccountType; companyName: string } {
-  const clean = email.toLowerCase().trim();
-  const parts = clean.split('@');
-  const domain = parts[1] ?? 'desconhecido';
-
-  if (FREE_EMAIL_DOMAINS.has(domain)) {
-    return {
-      scopeKey: `PF::${clean}`,
-      accountType: 'PF',
-      companyName: `Conta Pessoal (${parts[0]})`,
+      if (!foundKey) return '';
+      const raw = row[foundKey];
+      return raw === undefined || raw === null ? '' : String(raw).trim();
     };
-  }
 
-  // Remove subdomínios comuns de email (mail., email., smtp.)
-  const rootDomain = domain.replace(/^(mail|email|smtp|correio)\./i, '');
+    const name = findValue(['nome', 'contato', 'lead', 'clientename', 'nomecompleto', 'nomedocontato']);
+    const company = findValue(['empresa', 'razaosocial', 'companhia', 'organization', 'nomeempresa', 'razaosocialempresa']);
+    const email = findValue(['email', 'emailcorporativo', 'mail', 'correio', 'ecorporativo']);
+    const role = findValue(['cargo', 'funcao', 'posicao', 'role', 'cargofuncao', 'jobtitle', 'title']);
+    const linkedin = findValue(['linkedin', 'url', 'perfil']);
+    const phoneCel = findValue(['telefonecelular', 'celular', 'whatsapp', 'mobile', 'cel']);
+    const phoneFixo = findValue(['telefonefixo', 'fixo', 'telefone', 'phone', 'tel']);
+    const cnpj = findValue(['cnpj', 'cadastro', 'documento', 'cnpjdaempresa']).replace(/[^0-9]/g, '');
+    const valorRaw = findValue(['valor', 'valorproposta', 'proposta', 'valordeal', 'dealvalue', 'value']);
+    const valorProposta = valorRaw
+      ? Number(valorRaw.replace(/[^0-9.,-]/g, '').replace(/\./g, '').replace(',', '.')) || 0
+      : 0;
 
-  return {
-    scopeKey: `PJ::${rootDomain}`,
-    accountType: 'PJ',
-    companyName: rootDomain.split('.')[0].charAt(0).toUpperCase() + rootDomain.split('.')[0].slice(1),
+    return {
+      nome: name || 'Lead Sem Nome',
+      cargo: role,
+      emailCorporativo: email || '',
+      linkedin: linkedin,
+      telefoneCelular: phoneCel || phoneFixo || '',
+      telefoneFixo: phoneFixo || '',
+      nomeEmpresa: company || 'Empresa Não Identificada',
+      cnpj: cnpj,
+      temperatura: 'frio' as const,
+      stage: 'entrada' as const,
+      valorProposta: valorProposta,
+    };
   };
-}
 
-// ─── Secure ID generator ──────────────────────────────────────────────────────
-
-function genId(): string {
-  const arr = new Uint8Array(12);
-  if (typeof window !== 'undefined' && window.crypto) {
-    window.crypto.getRandomValues(arr);
-  } else {
-    for (let i = 0; i < 12; i++) arr[i] = Math.floor(Math.random() * 256);
-  }
-  return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
-}
-
-// ─── Simple hash (not for security — just to avoid plaintext in storage) ─────
-
-async function hashPassword(password: string): Promise<string> {
-  if (typeof window === 'undefined') return `__${password}__`;
-  const enc = new TextEncoder();
-  const buf = await window.crypto.subtle.digest('SHA-256', enc.encode(password + 'corca_salt_2024'));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  const computed = await hashPassword(password);
-  return computed === hash;
-}
-
-// ─── Detecção de tentativa de contato sem sucesso ──────────────────────────────
-
-/**
- * Lista de expressões (já sem acento, minúsculas) que indicam que o vendedor
- * NÃO conseguiu falar com o lead durante uma ligação.
- * Usada para disparar automaticamente um alerta de "retornar ligação".
- */
-const FAILED_CONTACT_KEYWORDS = [
-  'nao atendeu', 'nao atende', 'sem sucesso', 'sem retorno', 'nao retornou',
-  'nao consegui contato', 'nao conseguiu contato', 'nao consegui falar',
-  'nao consegui contata', 'caixa postal', 'numero errado', 'nao localizado',
-  'ocupado', 'ligacao caiu', 'desligou na ligacao', 'nao atendeu a ligacao',
-  'tentativa sem sucesso', 'sem exito', 'recado deixado', 'nao quis falar',
-  'ninguem atendeu', 'chamada nao completada', 'nao foi possivel contatar',
-  'sem contato', 'nao respondeu',
-];
-
-/** Remove acentos e coloca em minúsculas, para comparação robusta de texto livre. */
-function normalizeText(str: string): string {
-  return str
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-}
-
-/** Verifica se o texto de uma atividade indica que o contato não foi bem-sucedido. */
-function isFailedContactAttempt(content: string): boolean {
-  const normalized = normalizeText(content);
-  return FAILED_CONTACT_KEYWORDS.some((kw) => normalized.includes(kw));
-}
-
-// ─── Storage keys ─────────────────────────────────────────────────────────────
-
-const KEYS = {
-  users: 'corca_v3::users',
-  session: 'corca_v3::session',
-  leads: (scopeKey: string) => `corca_v3::leads::${scopeKey}`,
-  alerts: (userId: string) => `corca_v3::alerts::${userId}`,
-  ui: (email: string) => `corca_v3::ui::${email}`,
-};
-
-// ─── Low-level storage helpers (bypass zustand for sensitive data) ─────────────
-
-function storageGet<T>(key: string, fallback: T): T {
-  if (typeof window === 'undefined') return fallback;
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function storageSet<T>(key: string, value: T): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // storage full or blocked
-  }
-}
-
-function storageRemove(key: string): void {
-  if (typeof window === 'undefined') return;
-  localStorage.removeItem(key);
-}
-
-// ─── Store Interface ───────────────────────────────────────────────────────────
-
-interface CRMState {
-  // Session (never persisted in zustand — read from localStorage directly)
-  currentUser: UserProfile | null;
-  sessionKey: string | null;
-
-  // UI Preferences (persisted per-user in a separate key)
-  theme: Theme;
-  language: Language;
-  sidebarOpen: boolean;
-
-  // Leads (scoped — read/written via KEYS.leads(scopeKey))
-  leads: Lead[];
-
-  // Alerts (scoped — read/written via KEYS.alerts(userId))
-  alerts: Alert[];
-
-  // ── Auth ────────────────────────────────────────────────────────────────
-  register: (email: string, password: string, name: string) => Promise<{ ok: boolean; error?: string }>;
-  login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
-  logout: () => void;
-
-  // ── Leads ───────────────────────────────────────────────────────────────
-  loadLeads: () => void;
-  addLead: (data: Omit<Lead, 'id' | 'activities' | 'scopeKey' | 'createdByUserId' | 'createdAt' | 'updatedAt' | 'probabilidade'>) => void;
-  updateLead: (id: string, data: Partial<Omit<Lead, 'id' | 'scopeKey' | 'createdByUserId' | 'createdAt'>>) => void;
-  moveLead: (id: string, stage: Stage) => void;
-  deleteLead: (id: string) => void;
-  addActivity: (leadId: string, type: ActivityType, content: string) => void;
-
-  // ── Alerts ──────────────────────────────────────────────────────────────
-  loadAlerts: () => void;
-  markAlertRead: (id: string) => void;
-  dismissAlert: (id: string) => void;
-  markAllRead: () => void;
-  addAlert: (alert: Omit<Alert, 'id' | 'read' | 'createdAt'>) => void;
-
-  // ── UI ──────────────────────────────────────────────────────────────────
-  setTheme: (theme: Theme) => void;
-  toggleTheme: () => void;
-  setLanguage: (lang: Language) => void;
-  setSidebarOpen: (open: boolean) => void;
-
-  // ── Team (PJ only) ──────────────────────────────────────────────────────
-  getCompanyMembers: () => UserProfile[];
-  inviteTeamMember: (email: string, name: string, role: UserRole) => { ok: boolean; error?: string };
-}
-
-// ─── Store Implementation ─────────────────────────────────────────────────────
-
-export const useCRMStore = create<CRMState>()((set, get) => {
-
-  // ── Internal helpers ────────────────────────────────────────────────────────
-
-  function saveLeads(leads: Lead[], scopeKey: string): void {
-    storageSet(KEYS.leads(scopeKey), leads);
-  }
-
-  function saveAlerts(alerts: Alert[], userId: string): void {
-    storageSet(KEYS.alerts(userId), alerts);
-  }
-
-  function saveUIPrefs(email: string, prefs: UIPrefs): void {
-    storageSet(KEYS.ui(email), prefs);
-  }
-
-  function getCurrentScopeKey(): string | null {
-    return get().currentUser?.scopeKey ?? null;
-  }
-
-  // ── Store ───────────────────────────────────────────────────────────────────
-
-  return {
-    currentUser: null,
-    sessionKey: null,
-    theme: 'dark',
-    language: 'pt',
-    sidebarOpen: true,
-    leads: [],
-    alerts: [],
-
-    // ── Auth ──────────────────────────────────────────────────────────────────
-
-    register: async (email, password, name) => {
-      const clean = email.toLowerCase().trim();
-
-      if (!clean.includes('@') || !clean.includes('.')) {
-        return { ok: false, error: 'Email inválido.' };
-      }
-      if (password.length < 6) {
-        return { ok: false, error: 'Senha deve ter pelo menos 6 caracteres.' };
-      }
-      if (!name.trim()) {
-        return { ok: false, error: 'Nome é obrigatório.' };
-      }
-
-      // Check if email already exists
-      const users = storageGet<Record<string, { profile: UserProfile; hash: string }>>(KEYS.users, {});
-      if (users[clean]) {
-        return { ok: false, error: 'Este email já está cadastrado.' };
-      }
-
-      const { scopeKey, accountType, companyName } = deriveScopeKey(clean);
-      const hash = await hashPassword(password);
-
-      // Is this the first user from this company?
-      const existingFromSameScope = Object.values(users).filter(u => u.profile.scopeKey === scopeKey);
-      const role: UserRole = existingFromSameScope.length === 0 ? 'owner' : 'vendedor';
-
-      const profile: UserProfile = {
-        id: genId(),
-        email: clean,
-        name: name.trim(),
-        role,
-        accountType,
-        scopeKey,
-        companyName,
-        createdAt: new Date().toISOString(),
-      };
-
-      users[clean] = { profile, hash };
-      storageSet(KEYS.users, users);
-
-      // Create session
-      const sessionKey = genId();
-      storageSet(KEYS.session, { email: clean, sessionKey, loginAt: Date.now() });
-
-      // Load UI prefs for this user
-      const uiPrefs = storageGet<UIPrefs>(KEYS.ui(clean), { theme: 'dark', language: 'pt', sidebarOpen: true });
-
-      // Load leads and alerts for this scope
-      const leads = storageGet<Lead[]>(KEYS.leads(scopeKey), []);
-      const alerts = storageGet<Alert[]>(KEYS.alerts(profile.id), []);
-
-      set({
-        currentUser: profile,
-        sessionKey,
-        leads,
-        alerts,
-        theme: uiPrefs.theme,
-        language: uiPrefs.language,
-        sidebarOpen: uiPrefs.sidebarOpen,
-      });
-
-      // Welcome alert
-      const welcomeAlert: Alert = {
-        id: genId(),
-        type: 'success',
-        title: 'Bem-vindo ao CorçaCRM!',
-        message: `Olá, ${profile.name}! Seu pipeline está pronto. ${role === 'owner' ? '👑 Você é o administrador desta conta.' : ''}`,
-        read: false,
-        createdAt: new Date().toISOString(),
-      };
-      const newAlerts = [...alerts, welcomeAlert];
-      saveAlerts(newAlerts, profile.id);
-      set({ alerts: newAlerts });
-
-      return { ok: true };
-    },
-
-    login: async (email, password) => {
-      const clean = email.toLowerCase().trim();
-      const users = storageGet<Record<string, { profile: UserProfile; hash: string }>>(KEYS.users, {});
-      const entry = users[clean];
-
-      if (!entry) {
-        return { ok: false, error: 'Email não encontrado. Verifique ou crie uma conta.' };
-      }
-
-      const valid = await verifyPassword(password, entry.hash);
-      if (!valid) {
-        return { ok: false, error: 'Senha incorreta.' };
-      }
-
-      const profile = entry.profile;
-      const sessionKey = genId();
-      storageSet(KEYS.session, { email: clean, sessionKey, loginAt: Date.now() });
-
-      // Load data ONLY for this user's scope
-      const leads = storageGet<Lead[]>(KEYS.leads(profile.scopeKey), []);
-      const alerts = storageGet<Alert[]>(KEYS.alerts(profile.id), []);
-      const uiPrefs = storageGet<UIPrefs>(KEYS.ui(clean), { theme: 'dark', language: 'pt', sidebarOpen: true });
-
-      set({
-        currentUser: profile,
-        sessionKey,
-        leads,
-        alerts,
-        theme: uiPrefs.theme,
-        language: uiPrefs.language,
-        sidebarOpen: uiPrefs.sidebarOpen,
-      });
-
-      return { ok: true };
-    },
-
-    logout: () => {
-      const { currentUser, theme, language, sidebarOpen } = get();
-
-      // Save UI prefs before logout
-      if (currentUser) {
-        saveUIPrefs(currentUser.email, { theme, language, sidebarOpen });
-      }
-
-      // Clear session
-      storageRemove(KEYS.session);
-
-      // Reset state — ZERO data leak
-      set({
-        currentUser: null,
-        sessionKey: null,
-        leads: [],
-        alerts: [],
-        // Keep theme/language as last-used (not sensitive)
-      });
-    },
-
-    // ── Leads ─────────────────────────────────────────────────────────────────
-
-    loadLeads: () => {
-      const scopeKey = getCurrentScopeKey();
-      if (!scopeKey) return;
-      const leads = storageGet<Lead[]>(KEYS.leads(scopeKey), []);
-      set({ leads });
-    },
-
-    addLead: (data) => {
-      const { currentUser } = get();
-      if (!currentUser) return;
-
-      const lead: Lead = {
-        ...data,
-        id: genId(),
-        activities: [],
-        scopeKey: currentUser.scopeKey,
-        createdByUserId: currentUser.id,
-        probabilidade: STAGE_PROBABILITY[data.stage],
-        valorProposta: data.valorProposta ?? 0,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      const next = [...get().leads, lead];
-      set({ leads: next });
-      saveLeads(next, currentUser.scopeKey);
-
-      // Auto-alert for hot leads
-      if (data.temperatura === 'quente') {
-        get().addAlert({
-          type: 'warning',
-          title: '🔥 Lead Quente adicionado',
-          message: `${data.nome} (${data.nomeEmpresa}) está marcado como QUENTE. Entre em contato hoje!`,
-          leadId: lead.id,
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsProcessing(true);
+    const file = files[0];
+    const reader = new FileReader();
+
+    reader.onload = (event) => {
+      try {
+        const data = event.target?.result;
+        if (!data) throw new Error('Falha no buffer do arquivo.');
+
+        const workbook = XLSX.read(data, { type: 'binary' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+        if (jsonData.length === 0) {
+          alert('⚠️ A planilha selecionada está vazia.');
+          setIsProcessing(false);
+          return;
+        }
+
+        let importedCount = 0;
+
+        jsonData.forEach((row: any) => {
+          const formattedLead = mapRowToLead(row);
+          if (formattedLead.nome !== 'Lead Sem Nome' || formattedLead.nomeEmpresa !== 'Empresa Não Identificada') {
+            addLead(formattedLead);
+            importedCount++;
+          }
         });
+
+        alert(`🎉 Sucesso! Foram importados ${importedCount} contatos diretamente para a etapa de Entrada do seu Funil.`);
+      } catch (error) {
+        console.error(error);
+        alert('❌ Erro ao ler arquivo Excel. Verifique a formatação das colunas.');
+      } finally {
+        setIsProcessing(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
       }
-    },
+    };
 
-    updateLead: (id, data) => {
-      const { currentUser, leads } = get();
-      if (!currentUser) return;
-
-      const next = leads.map(l =>
-        l.id === id
-          ? { ...l, ...data, updatedAt: new Date().toISOString() }
-          : l
-      );
-      set({ leads: next });
-      saveLeads(next, currentUser.scopeKey);
-    },
-
-    moveLead: (id, stage) => {
-      const { currentUser, leads } = get();
-      if (!currentUser) return;
-
-      const next = leads.map(l =>
-        l.id === id
-          ? { ...l, stage, probabilidade: STAGE_PROBABILITY[stage], updatedAt: new Date().toISOString() }
-          : l
-      );
-      set({ leads: next });
-      saveLeads(next, currentUser.scopeKey);
-
-      // Auto-alert when reaching final stage
-      const lead = leads.find(l => l.id === id);
-      if (stage === 'fim_cadencia' && lead) {
-        get().addAlert({
-          type: 'success',
-          title: '🎉 Lead avançou para Fim de Cadência!',
-          message: `${lead.nome} está pronto para proposta. Agende o fechamento!`,
-          leadId: id,
-        });
-      }
-    },
-
-    deleteLead: (id) => {
-      const { currentUser, leads } = get();
-      if (!currentUser) return;
-
-      const next = leads.filter(l => l.id !== id);
-      set({ leads: next });
-      saveLeads(next, currentUser.scopeKey);
-    },
-
-    addActivity: (leadId, type, content) => {
-      const { currentUser, leads } = get();
-      if (!currentUser) return;
-
-      const activity: Activity = {
-        id: genId(),
-        type,
-        content,
-        userId: currentUser.id,
-        date: new Date().toISOString(),
-      };
-
-      const next = leads.map(l =>
-        l.id === leadId
-          ? { ...l, activities: [...l.activities, activity], updatedAt: new Date().toISOString() }
-          : l
-      );
-      set({ leads: next });
-      saveLeads(next, currentUser.scopeKey);
-
-      // 🔔 Alerta automático: ligação sem sucesso → lembrete de retorno
-      // Analisa o texto da atividade (descrição/comentário) em busca de
-      // expressões que indiquem que o vendedor não conseguiu contato.
-      if (isFailedContactAttempt(content)) {
-        const lead = next.find(l => l.id === leadId);
-        get().addAlert({
-          type: 'warning',
-          title: '📞 Retornar ligação',
-          message: `A tentativa de contato com ${lead?.nome ?? 'este lead'}${lead?.nomeEmpresa ? ` (${lead.nomeEmpresa})` : ''} não teve sucesso. Lembre-se de retornar a ligação.`,
-          leadId,
-        });
-      }
-    },
-
-    // ── Alerts ────────────────────────────────────────────────────────────────
-
-    loadAlerts: () => {
-      const { currentUser } = get();
-      if (!currentUser) return;
-      const alerts = storageGet<Alert[]>(KEYS.alerts(currentUser.id), []);
-      set({ alerts });
-    },
-
-    addAlert: (data) => {
-      const { currentUser, alerts } = get();
-      if (!currentUser) return;
-
-      const alert: Alert = {
-        ...data,
-        id: genId(),
-        read: false,
-        createdAt: new Date().toISOString(),
-      };
-      const next = [...alerts, alert];
-      set({ alerts: next });
-      saveAlerts(next, currentUser.id);
-    },
-
-    markAlertRead: (id) => {
-      const { currentUser, alerts } = get();
-      if (!currentUser) return;
-      const next = alerts.map(a => a.id === id ? { ...a, read: true } : a);
-      set({ alerts: next });
-      saveAlerts(next, currentUser.id);
-    },
-
-    dismissAlert: (id) => {
-      const { currentUser, alerts } = get();
-      if (!currentUser) return;
-      const next = alerts.filter(a => a.id !== id);
-      set({ alerts: next });
-      saveAlerts(next, currentUser.id);
-    },
-
-    markAllRead: () => {
-      const { currentUser, alerts } = get();
-      if (!currentUser) return;
-      const next = alerts.map(a => ({ ...a, read: true }));
-      set({ alerts: next });
-      saveAlerts(next, currentUser.id);
-    },
-
-    // ── UI ────────────────────────────────────────────────────────────────────
-
-    setTheme: (theme) => {
-      const { currentUser } = get();
-      set({ theme });
-      if (currentUser) {
-        const prefs = storageGet<UIPrefs>(KEYS.ui(currentUser.email), { theme: 'dark', language: 'pt', sidebarOpen: true });
-        saveUIPrefs(currentUser.email, { ...prefs, theme });
-      }
-    },
-
-    toggleTheme: () => {
-      const next = get().theme === 'dark' ? 'light' : 'dark';
-      get().setTheme(next);
-    },
-
-    setLanguage: (language) => {
-      const { currentUser } = get();
-      set({ language });
-      if (currentUser) {
-        const prefs = storageGet<UIPrefs>(KEYS.ui(currentUser.email), { theme: 'dark', language: 'pt', sidebarOpen: true });
-        saveUIPrefs(currentUser.email, { ...prefs, language });
-      }
-    },
-
-    setSidebarOpen: (sidebarOpen) => {
-      set({ sidebarOpen });
-    },
-
-    // ── Team ──────────────────────────────────────────────────────────────────
-
-    getCompanyMembers: () => {
-      const { currentUser } = get();
-      if (!currentUser) return [];
-      const users = storageGet<Record<string, { profile: UserProfile; hash: string }>>(KEYS.users, {});
-      return Object.values(users)
-        .filter(u => u.profile.scopeKey === currentUser.scopeKey)
-        .map(u => u.profile);
-    },
-
-    inviteTeamMember: (email, name, role) => {
-      const { currentUser } = get();
-      if (!currentUser) return { ok: false, error: 'Não autenticado.' };
-      if (currentUser.role !== 'owner' && currentUser.role !== 'admin') {
-        return { ok: false, error: 'Apenas admins podem convidar membros.' };
-      }
-
-      const clean = email.toLowerCase().trim();
-      const users = storageGet<Record<string, { profile: UserProfile; hash: string }>>(KEYS.users, {});
-
-      if (users[clean]) {
-        return { ok: false, error: 'Este email já está cadastrado.' };
-      }
-
-      // Derive scope — must match company
-      const { scopeKey, accountType, companyName } = deriveScopeKey(clean);
-      if (scopeKey !== currentUser.scopeKey) {
-        return { ok: false, error: `Este email (${email}) não pertence ao domínio da sua empresa (${currentUser.companyName}).` };
-      }
-
-      const profile: UserProfile = {
-        id: genId(),
-        email: clean,
-        name: name.trim(),
-        role,
-        accountType,
-        scopeKey,
-        companyName,
-        createdAt: new Date().toISOString(),
-      };
-
-      // Temporary password that they must change on first login
-      const tempPass = genId().slice(0, 8);
-
-      users[clean] = { profile, hash: '' }; // hash set on first login
-      storageSet(KEYS.users, users);
-
-      return { ok: true };
-    },
+    reader.readAsBinaryString(file);
   };
-});
 
-// ─── Session Restore (call this in app root) ───────────────────────────────────
+  const handleDragStart = (e: React.DragEvent, leadId: string) => {
+    setDraggedLeadId(leadId);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', leadId);
+  };
 
-/**
- * Chame esta função no `useEffect` do layout raiz para restaurar a sessão.
- * Ela lê o sessionKey do localStorage e recarrega o usuário correto.
- */
-export async function restoreSession(): Promise<boolean> {
-  if (typeof window === 'undefined') return false;
+  const handleDragEnd = () => {
+    setDraggedLeadId(null);
+    setDragOverColumn(null);
+  };
 
-  const session = storageGet<{ email: string; sessionKey: string; loginAt: number } | null>(KEYS.session, null);
-  if (!session) return false;
-
-  // Session expires after 7 days
-  const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
-  if (Date.now() - session.loginAt > SESSION_TTL) {
-    storageRemove(KEYS.session);
-    return false;
-  }
-
-  const users = storageGet<Record<string, { profile: UserProfile; hash: string }>>(KEYS.users, {});
-  const entry = users[session.email];
-  if (!entry) {
-    storageRemove(KEYS.session);
-    return false;
-  }
-
-  const { profile } = entry;
-  const leads = storageGet<Lead[]>(KEYS.leads(profile.scopeKey), []);
-  const alerts = storageGet<Alert[]>(KEYS.alerts(profile.id), []);
-  const uiPrefs = storageGet<UIPrefs>(KEYS.ui(session.email), { theme: 'dark', language: 'pt', sidebarOpen: true });
-
-  useCRMStore.setState({
-    currentUser: profile,
-    sessionKey: session.sessionKey,
-    leads,
-    alerts,
-    theme: uiPrefs.theme,
-    language: uiPrefs.language,
-    sidebarOpen: uiPrefs.sidebarOpen,
-  });
-
-  return true;
-}
-
-// ─── Daily alert automation ────────────────────────────────────────────────────
-
-/**
- * Chame esta função uma vez por dia (via useEffect com timestamp check)
- * para gerar alertas automáticos de follow-up.
- */
-export function runDailyAlertAutomation(): void {
-  const state = useCRMStore.getState();
-  const { currentUser, leads, addAlert } = state;
-  if (!currentUser) return;
-
-  const today = new Date();
-  const todayStr = today.toISOString().split('T')[0];
-
-  // Check if automation already ran today
-  const lastRun = storageGet<string>(`corca_v3::automation::${currentUser.id}`, '');
-  if (lastRun === todayStr) return;
-
-  storageSet(`corca_v3::automation::${currentUser.id}`, todayStr);
-
-  const myLeads = leads.filter(l => l.createdByUserId === currentUser.id || currentUser.role !== 'vendedor');
-
-  // Leads without activity in 3+ days
-  const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
-  const staleLeads = myLeads.filter(l => {
-    const lastActivity = l.activities.length > 0
-      ? new Date(l.activities[l.activities.length - 1].date)
-      : new Date(l.createdAt);
-    return lastActivity < threeDaysAgo && l.stage !== 'fim_cadencia';
-  });
-
-  if (staleLeads.length > 0) {
-    addAlert({
-      type: 'warning',
-      title: `⏰ ${staleLeads.length} leads sem atividade há 3+ dias`,
-      message: `Leads parados: ${staleLeads.slice(0, 3).map(l => l.nome).join(', ')}${staleLeads.length > 3 ? ` e mais ${staleLeads.length - 3}` : ''}. Faça follow-up hoje!`,
-    });
-  }
-
-  // Hot leads without activity today
-  const hotNoContact = myLeads.filter(l => {
-    if (l.temperatura !== 'quente') return false;
-    const lastActivity = l.activities.length > 0
-      ? new Date(l.activities[l.activities.length - 1].date)
-      : new Date(l.createdAt);
-    return lastActivity < new Date(Date.now() - 24 * 60 * 60 * 1000);
-  });
-
-  if (hotNoContact.length > 0) {
-    addAlert({
-      type: 'danger',
-      title: `🔥 ${hotNoContact.length} lead(s) QUENTE(s) sem contato hoje`,
-      message: `Não perca oportunidades quentes! Entre em contato agora: ${hotNoContact.slice(0, 2).map(l => l.nome).join(', ')}.`,
-    });
-  }
-
-  // Weekly summary (Monday only)
-  if (today.getDay() === 1) {
-    const lastWeek = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const callsLastWeek = myLeads.reduce((sum, l) =>
-      sum + l.activities.filter(a => a.type === 'telefone' && new Date(a.date) > lastWeek).length, 0);
-    const meetingsLastWeek = myLeads.filter(l =>
-      l.stage === 'reuniao' || l.activities.some(a => a.type === 'reuniao' && new Date(a.date) > lastWeek)).length;
-
-    addAlert({
-      type: 'info',
-      title: '📊 Resumo semanal',
-      message: `Semana passada: ${callsLastWeek} ligações, ${meetingsLastWeek} reuniões agendadas. Meta: 100 ligações e 6 reuniões/semana.`,
-    });
-
-    // Analysis: why leads didn't convert to meetings
-    const noMeeting = myLeads.filter(l =>
-      l.stage === 'entrada' || l.stage === 'enriquecer'
-    ).filter(l => {
-      const created = new Date(l.createdAt);
-      return created > lastWeek;
-    });
-
-    if (noMeeting.length > 0) {
-      addAlert({
-        type: 'info',
-        title: `📋 ${noMeeting.length} leads não avançaram para reunião`,
-        message: `Analise os motivos em Relatórios → Motivos de Não-Reunião para otimizar sua cadência.`,
-      });
+  const handleDragOver = (e: React.DragEvent, columnId: Stage) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverColumn !== columnId) {
+      setDragOverColumn(columnId);
     }
-  }
+  };
+
+  const handleDragLeave = (e: React.DragEvent, columnId: Stage) => {
+    e.preventDefault();
+    if (dragOverColumn === columnId) {
+      setDragOverColumn(null);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent, columnId: Stage) => {
+    e.preventDefault();
+    const leadId = e.dataTransfer.getData('text/plain') || draggedLeadId;
+    if (leadId) {
+      moveLead(leadId, columnId);
+    }
+    setDraggedLeadId(null);
+    setDragOverColumn(null);
+  };
+
+  const columns: { title: string; id: Stage; color: string }[] = [
+    { title: 'Entrada', id: 'entrada', color: 'bg-indigo-500/10 border-indigo-500/30 text-indigo-400' },
+    { title: 'Enriquecer', id: 'enriquecer', color: 'bg-amber-500/10 border-amber-500/30 text-amber-400' },
+    { title: 'Reunião', id: 'reuniao', color: 'bg-sky-500/10 border-sky-500/30 text-sky-400' },
+    { title: 'Fim de Cadência', id: 'fim_cadencia', color: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div className="space-y-4 border-b border-slate-800 pb-5">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <h1 className="text-2xl font-black tracking-tight">Pipeline de Vendas B2B</h1>
+            <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>Arraste os cards entre as etapas ou clique para abrir o detalhe do lead.</p>
+          </div>
+
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".xlsx, .xls" className="hidden" />
+            <button
+              type="button"
+              disabled={isProcessing}
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-lg transition-all disabled:opacity-50 whitespace-nowrap"
+            >
+              {isProcessing ? 'Mapeando...' : <> <FileSpreadsheet className="w-4 h-4" /> Importar Lista de Contatos </>}
+            </button>
+          </div>
+        </div>
+
+        <div className="relative">
+          <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`} />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Buscar lead por nome, empresa, email ou cargo..."
+            className={`w-full text-sm rounded-xl pl-10 pr-10 py-2.5 outline-none border transition-colors ${
+              theme === 'dark'
+                ? 'bg-slate-900 border-slate-700 text-slate-100 placeholder-slate-500 focus:border-indigo-500'
+                : 'bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400 focus:border-indigo-400'
+            }`}
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className={`absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-md transition-colors ${
+                theme === 'dark' ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {columns.map(column => {
+          const filteredLeads = myLeads.filter(l => {
+            if (l.stage !== column.id) return false;
+            if (!searchQuery.trim()) return true;
+            const q = searchQuery.toLowerCase().trim();
+            return (
+              l.nome.toLowerCase().includes(q) ||
+              l.nomeEmpresa.toLowerCase().includes(q) ||
+              l.emailCorporativo.toLowerCase().includes(q) ||
+              l.cargo.toLowerCase().includes(q)
+            );
+          });
+          const isDragOver = dragOverColumn === column.id;
+          return (
+            <div
+              key={column.id}
+              onDragOver={(e) => handleDragOver(e, column.id)}
+              onDragLeave={(e) => handleDragLeave(e, column.id)}
+              onDrop={(e) => handleDrop(e, column.id)}
+              className={`p-4 rounded-2xl border min-h-[500px] flex flex-col transition-colors ${
+                isDragOver
+                  ? 'border-indigo-500 bg-indigo-500/5'
+                  : theme === 'dark'
+                    ? 'bg-slate-900/40 border-slate-800'
+                    : 'bg-white border-slate-200 shadow-sm'
+              }`}
+            >
+              <div className={`p-2.5 rounded-xl border text-xs font-black mb-4 uppercase tracking-wider flex justify-between items-center ${column.color}`}>
+                <span>{column.title}</span>
+                <span className="px-2 py-0.5 rounded-md bg-black/20 text-[10px]">{filteredLeads.length}</span>
+              </div>
+
+              <div className="flex-1 space-y-3 overflow-y-auto max-h-[600px] pr-1">
+                {filteredLeads.map(lead => (
+                  <div
+                    key={lead.id}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, lead.id)}
+                    onDragEnd={handleDragEnd}
+                    onClick={() => onOpenLead(lead.id)}
+                    className={`group p-4 rounded-xl border transition-all cursor-pointer ${
+                      draggedLeadId === lead.id
+                        ? 'opacity-40 border-dashed border-indigo-500'
+                        : theme === 'dark'
+                          ? 'bg-slate-900 border-slate-800 hover:border-indigo-500/50 hover:shadow-lg hover:shadow-indigo-500/10'
+                          : 'bg-slate-50 border-slate-200 shadow-sm hover:border-indigo-500/50 hover:shadow-md'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                        <GripVertical className={`w-3.5 h-3.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity ${
+                          theme === 'dark' ? 'text-slate-600' : 'text-slate-400'
+                        }`} />
+                        <div className="font-bold text-sm truncate">{lead.nome}</div>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm(`Excluir o lead "${lead.nome}"?`)) {
+                            deleteLead(lead.id);
+                          }
+                        }}
+                        className={`p-1 rounded-md opacity-0 group-hover:opacity-100 transition-all flex-shrink-0 ${
+                          theme === 'dark'
+                            ? 'text-slate-600 hover:text-rose-400 hover:bg-rose-500/10'
+                            : 'text-slate-400 hover:text-rose-500 hover:bg-rose-500/10'
+                        }`}
+                        title="Excluir lead"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <div className="text-xs text-indigo-500 font-semibold mb-2 truncate pl-5">{lead.nomeEmpresa}</div>
+                    {lead.emailCorporativo && (
+                      <div className="text-[11px] text-slate-400 truncate mb-1 pl-5">✉️ {lead.emailCorporativo}</div>
+                    )}
+                    {lead.cargo && (
+                      <div className={`mt-2 pt-2 border-t text-[10px] line-clamp-2 leading-relaxed pl-5 ${
+                        theme === 'dark' ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-600'
+                      }`}>
+                        {lead.cargo}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {filteredLeads.length === 0 && (
+                  <div className="text-center text-xs text-slate-600 py-12 border-2 border-dashed border-slate-800/10 rounded-xl my-auto">
+                    Nenhum lead nesta etapa
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
