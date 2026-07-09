@@ -166,6 +166,37 @@ async function verifyPassword(password: string, hash: string): Promise<boolean> 
   return computed === hash;
 }
 
+// ─── Detecção de tentativa de contato sem sucesso ──────────────────────────────
+
+/**
+ * Lista de expressões (já sem acento, minúsculas) que indicam que o vendedor
+ * NÃO conseguiu falar com o lead durante uma ligação.
+ * Usada para disparar automaticamente um alerta de "retornar ligação".
+ */
+const FAILED_CONTACT_KEYWORDS = [
+  'nao atendeu', 'nao atende', 'sem sucesso', 'sem retorno', 'nao retornou',
+  'nao consegui contato', 'nao conseguiu contato', 'nao consegui falar',
+  'nao consegui contata', 'caixa postal', 'numero errado', 'nao localizado',
+  'ocupado', 'ligacao caiu', 'desligou na ligacao', 'nao atendeu a ligacao',
+  'tentativa sem sucesso', 'sem exito', 'recado deixado', 'nao quis falar',
+  'ninguem atendeu', 'chamada nao completada', 'nao foi possivel contatar',
+  'sem contato', 'nao respondeu',
+];
+
+/** Remove acentos e coloca em minúsculas, para comparação robusta de texto livre. */
+function normalizeText(str: string): string {
+  return str
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+/** Verifica se o texto de uma atividade indica que o contato não foi bem-sucedido. */
+function isFailedContactAttempt(content: string): boolean {
+  const normalized = normalizeText(content);
+  return FAILED_CONTACT_KEYWORDS.some((kw) => normalized.includes(kw));
+}
+
 // ─── Storage keys ─────────────────────────────────────────────────────────────
 
 const KEYS = {
@@ -526,6 +557,19 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       );
       set({ leads: next });
       saveLeads(next, currentUser.scopeKey);
+
+      // 🔔 Alerta automático: ligação sem sucesso → lembrete de retorno
+      // Analisa o texto da atividade (descrição/comentário) em busca de
+      // expressões que indiquem que o vendedor não conseguiu contato.
+      if (isFailedContactAttempt(content)) {
+        const lead = next.find(l => l.id === leadId);
+        get().addAlert({
+          type: 'warning',
+          title: '📞 Retornar ligação',
+          message: `A tentativa de contato com ${lead?.nome ?? 'este lead'}${lead?.nomeEmpresa ? ` (${lead.nomeEmpresa})` : ''} não teve sucesso. Lembre-se de retornar a ligação.`,
+          leadId,
+        });
+      }
     },
 
     // ── Alerts ────────────────────────────────────────────────────────────────
