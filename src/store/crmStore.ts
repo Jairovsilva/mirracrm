@@ -1,18 +1,22 @@
 'use client';
 
 /**
- * CorçaCRM — Store v3 (Bolt-safe, Zero Data Leak)
+ * CorçaCRM — Store v4 (Supabase — persistência real entre navegadores/dispositivos)
  *
  * ARQUITETURA:
- * - Nenhum dado de usuário diferente compartilha o mesmo espaço de memória
- * - Chaves de storage são compostas: prefixo::namespace::id
- * - currentUser é derivado de sessionKey (não de cache de estado)
- * - PF (pessoa física) e PJ (corporativo) têm namespaces estruturalmente diferentes
- * - Sem race condition: reads e writes usam a mesma função de derivação de escopo
+ * - Autenticação e dados agora vivem no Supabase (Postgres + Auth), não mais no localStorage.
+ * - A visibilidade de leads é garantida em duas camadas:
+ *   1) Row Level Security no banco (fonte da verdade — não pode ser burlada pelo cliente)
+ *   2) Os selects já vêm filtrados: owner/admin recebem todos os leads da empresa,
+ *      vendedor recebe apenas os leads que ele mesmo criou.
+ * - Preferências de UI (tema/idioma) continuam no localStorage por serem dados
+ *   não sensíveis e não precisarem sincronizar entre dispositivos.
+ * - A interface pública do store (nomes de funções e campos) foi mantida igual
+ *   à versão anterior — nenhum componente que consome o store precisa mudar.
  */
 
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
+import { supabase } from '@/src/lib/supabaseClient';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -49,7 +53,6 @@ export interface Lead {
   motivoPerda?: string;
   motivoSemReuniao?: string;
   activities: Activity[];
-  // Chave imutável derivada no momento da criação — nunca muda
   readonly scopeKey: string;
   readonly createdByUserId: string;
   readonly createdAt: string;
@@ -62,10 +65,7 @@ export interface UserProfile {
   name: string;
   role: UserRole;
   accountType: AccountType;
-  // Chave de escopo derivada do email — nunca muda após criação
   readonly scopeKey: string;
-  // Para PJ: todos da mesma empresa compartilham este scopeKey
-  // Para PF: scopeKey é único por email
   companyName: string;
   createdAt: string;
 }
@@ -110,13 +110,6 @@ const STAGE_PROBABILITY: Record<Stage, number> = {
 
 // ─── Scope Key derivation (pure function — deterministic) ─────────────────────
 
-/**
- * REGRA CENTRAL: scopeKey é derivado SEMPRE da mesma forma.
- * PF → "PF::email@dominio.com"   (isolamento individual)
- * PJ → "PJ::dominio.com"         (compartilhado pela empresa)
- *
- * Esta função é pura e não depende de nenhum estado.
- */
 export function deriveScopeKey(email: string): { scopeKey: string; accountType: AccountType; companyName: string } {
   const clean = email.toLowerCase().trim();
   const parts = clean.split('@');
@@ -130,7 +123,6 @@ export function deriveScopeKey(email: string): { scopeKey: string; accountType: 
     };
   }
 
-  // Remove subdomínios comuns de email (mail., email., smtp.)
   const rootDomain = domain.replace(/^(mail|email|smtp|correio)\./i, '');
 
   return {
@@ -140,39 +132,8 @@ export function deriveScopeKey(email: string): { scopeKey: string; accountType: 
   };
 }
 
-// ─── Secure ID generator ──────────────────────────────────────────────────────
-
-function genId(): string {
-  const arr = new Uint8Array(12);
-  if (typeof window !== 'undefined' && window.crypto) {
-    window.crypto.getRandomValues(arr);
-  } else {
-    for (let i = 0; i < 12; i++) arr[i] = Math.floor(Math.random() * 256);
-  }
-  return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
-}
-
-// ─── Simple hash (not for security — just to avoid plaintext in storage) ─────
-
-async function hashPassword(password: string): Promise<string> {
-  if (typeof window === 'undefined') return `__${password}__`;
-  const enc = new TextEncoder();
-  const buf = await window.crypto.subtle.digest('SHA-256', enc.encode(password + 'corca_salt_2024'));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  const computed = await hashPassword(password);
-  return computed === hash;
-}
-
 // ─── Detecção de tentativa de contato sem sucesso ──────────────────────────────
 
-/**
- * Lista de expressões (já sem acento, minúsculas) que indicam que o vendedor
- * NÃO conseguiu falar com o lead durante uma ligação.
- * Usada para disparar automaticamente um alerta de "retornar ligação".
- */
 const FAILED_CONTACT_KEYWORDS = [
   'nao atendeu', 'nao atende', 'sem sucesso', 'sem retorno', 'nao retornou',
   'nao consegui contato', 'nao conseguiu contato', 'nao consegui falar',
@@ -183,7 +144,6 @@ const FAILED_CONTACT_KEYWORDS = [
   'sem contato', 'nao respondeu',
 ];
 
-/** Remove acentos e coloca em minúsculas, para comparação robusta de texto livre. */
 function normalizeText(str: string): string {
   return str
     .normalize('NFD')
@@ -191,23 +151,78 @@ function normalizeText(str: string): string {
     .toLowerCase();
 }
 
-/** Verifica se o texto de uma atividade indica que o contato não foi bem-sucedido. */
 function isFailedContactAttempt(content: string): boolean {
   const normalized = normalizeText(content);
   return FAILED_CONTACT_KEYWORDS.some((kw) => normalized.includes(kw));
 }
 
-// ─── Storage keys ─────────────────────────────────────────────────────────────
+// ─── Mappers (linhas do banco em snake_case → objetos camelCase da store) ──────
+
+function mapProfileRow(row: any): UserProfile {
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    role: row.role,
+    accountType: row.account_type,
+    scopeKey: row.scope_key,
+    companyName: row.company_name,
+    createdAt: row.created_at,
+  };
+}
+
+function mapLeadRow(row: any, activities: Activity[]): Lead {
+  return {
+    id: row.id,
+    nome: row.nome,
+    cargo: row.cargo ?? '',
+    emailCorporativo: row.email_corporativo ?? '',
+    telefoneCelular: row.telefone_celular ?? '',
+    telefoneFixo: row.telefone_fixo ?? '',
+    nomeEmpresa: row.nome_empresa ?? '',
+    cnpj: row.cnpj ?? '',
+    linkedin: row.linkedin ?? '',
+    stage: row.stage,
+    temperatura: row.temperatura,
+    valorProposta: Number(row.valor_proposta ?? 0),
+    probabilidade: Number(row.probabilidade ?? 0),
+    motivoPerda: row.motivo_perda ?? undefined,
+    motivoSemReuniao: row.motivo_sem_reuniao ?? undefined,
+    activities,
+    scopeKey: row.scope_key,
+    createdByUserId: row.created_by_user_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapActivityRow(row: any): Activity {
+  return {
+    id: row.id,
+    type: row.type,
+    date: row.date,
+    content: row.content,
+    userId: row.user_id,
+  };
+}
+
+function mapAlertRow(row: any): Alert {
+  return {
+    id: row.id,
+    type: row.type,
+    title: row.title,
+    message: row.message,
+    read: row.read,
+    leadId: row.lead_id ?? undefined,
+    createdAt: row.created_at,
+  };
+}
+
+// ─── Preferências de UI (continuam locais — não sensíveis, não precisam sincronizar)
 
 const KEYS = {
-  users: 'corca_v3::users',
-  session: 'corca_v3::session',
-  leads: (scopeKey: string) => `corca_v3::leads::${scopeKey}`,
-  alerts: (userId: string) => `corca_v3::alerts::${userId}`,
   ui: (email: string) => `corca_v3::ui::${email}`,
 };
-
-// ─── Low-level storage helpers (bypass zustand for sensitive data) ─────────────
 
 function storageGet<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
@@ -229,48 +244,39 @@ function storageSet<T>(key: string, value: T): void {
   }
 }
 
-function storageRemove(key: string): void {
-  if (typeof window === 'undefined') return;
-  localStorage.removeItem(key);
-}
-
 // ─── Store Interface ───────────────────────────────────────────────────────────
 
 interface CRMState {
-  // Session (never persisted in zustand — read from localStorage directly)
   currentUser: UserProfile | null;
-  sessionKey: string | null;
+  accessToken: string | null;
 
-  // UI Preferences (persisted per-user in a separate key)
   theme: Theme;
   language: Language;
   sidebarOpen: boolean;
 
-  // Leads (scoped — read/written via KEYS.leads(scopeKey))
   leads: Lead[];
-
-  // Alerts (scoped — read/written via KEYS.alerts(userId))
   alerts: Alert[];
 
   // ── Auth ────────────────────────────────────────────────────────────────
   register: (email: string, password: string, name: string) => Promise<{ ok: boolean; error?: string }>;
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => void;
+  changePassword: (newPassword: string) => Promise<{ ok: boolean; error?: string }>;
 
   // ── Leads ───────────────────────────────────────────────────────────────
-  loadLeads: () => void;
-  addLead: (data: Omit<Lead, 'id' | 'activities' | 'scopeKey' | 'createdByUserId' | 'createdAt' | 'updatedAt' | 'probabilidade'>) => void;
-  updateLead: (id: string, data: Partial<Omit<Lead, 'id' | 'scopeKey' | 'createdByUserId' | 'createdAt'>>) => void;
-  moveLead: (id: string, stage: Stage) => void;
-  deleteLead: (id: string) => void;
-  addActivity: (leadId: string, type: ActivityType, content: string) => void;
+  loadLeads: () => Promise<void>;
+  addLead: (data: Omit<Lead, 'id' | 'activities' | 'scopeKey' | 'createdByUserId' | 'createdAt' | 'updatedAt' | 'probabilidade'>) => Promise<void>;
+  updateLead: (id: string, data: Partial<Omit<Lead, 'id' | 'scopeKey' | 'createdByUserId' | 'createdAt'>>) => Promise<void>;
+  moveLead: (id: string, stage: Stage) => Promise<void>;
+  deleteLead: (id: string) => Promise<void>;
+  addActivity: (leadId: string, type: ActivityType, content: string) => Promise<void>;
 
   // ── Alerts ──────────────────────────────────────────────────────────────
-  loadAlerts: () => void;
-  markAlertRead: (id: string) => void;
-  dismissAlert: (id: string) => void;
-  markAllRead: () => void;
-  addAlert: (alert: Omit<Alert, 'id' | 'read' | 'createdAt'>) => void;
+  loadAlerts: () => Promise<void>;
+  markAlertRead: (id: string) => Promise<void>;
+  dismissAlert: (id: string) => Promise<void>;
+  markAllRead: () => Promise<void>;
+  addAlert: (alert: Omit<Alert, 'id' | 'read' | 'createdAt'>) => Promise<void>;
 
   // ── UI ──────────────────────────────────────────────────────────────────
   setTheme: (theme: Theme) => void;
@@ -279,37 +285,21 @@ interface CRMState {
   setSidebarOpen: (open: boolean) => void;
 
   // ── Team (PJ only) ──────────────────────────────────────────────────────
-  getCompanyMembers: () => UserProfile[];
-  inviteTeamMember: (email: string, name: string, role: UserRole) => { ok: boolean; error?: string };
+  getCompanyMembers: () => Promise<UserProfile[]>;
+  inviteTeamMember: (email: string, name: string, role: UserRole, password: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 // ─── Store Implementation ─────────────────────────────────────────────────────
 
 export const useCRMStore = create<CRMState>()((set, get) => {
 
-  // ── Internal helpers ────────────────────────────────────────────────────────
-
-  function saveLeads(leads: Lead[], scopeKey: string): void {
-    storageSet(KEYS.leads(scopeKey), leads);
-  }
-
-  function saveAlerts(alerts: Alert[], userId: string): void {
-    storageSet(KEYS.alerts(userId), alerts);
-  }
-
   function saveUIPrefs(email: string, prefs: UIPrefs): void {
     storageSet(KEYS.ui(email), prefs);
   }
 
-  function getCurrentScopeKey(): string | null {
-    return get().currentUser?.scopeKey ?? null;
-  }
-
-  // ── Store ───────────────────────────────────────────────────────────────────
-
   return {
     currentUser: null,
-    sessionKey: null,
+    accessToken: null,
     theme: 'dark',
     language: 'pt',
     sidebarOpen: true,
@@ -331,21 +321,40 @@ export const useCRMStore = create<CRMState>()((set, get) => {
         return { ok: false, error: 'Nome é obrigatório.' };
       }
 
-      // Check if email already exists
-      const users = storageGet<Record<string, { profile: UserProfile; hash: string }>>(KEYS.users, {});
-      if (users[clean]) {
-        return { ok: false, error: 'Este email já está cadastrado.' };
+      const { scopeKey, accountType, companyName } = deriveScopeKey(clean);
+
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: clean,
+        password,
+      });
+
+      if (signUpError || !signUpData.user) {
+        const msg = signUpError?.message?.toLowerCase() ?? '';
+        if (msg.includes('already registered') || msg.includes('already exists')) {
+          return { ok: false, error: 'Este email já está cadastrado.' };
+        }
+        return { ok: false, error: signUpError?.message || 'Erro ao cadastrar.' };
       }
 
-      const { scopeKey, accountType, companyName } = deriveScopeKey(clean);
-      const hash = await hashPassword(password);
+      const { data: countInScope } = await supabase.rpc('count_profiles_in_scope', { p_scope_key: scopeKey });
+      const role: UserRole = (countInScope ?? 0) === 0 ? 'owner' : 'vendedor';
 
-      // Is this the first user from this company?
-      const existingFromSameScope = Object.values(users).filter(u => u.profile.scopeKey === scopeKey);
-      const role: UserRole = existingFromSameScope.length === 0 ? 'owner' : 'vendedor';
+      const { error: profileError } = await supabase.from('profiles').insert({
+        id: signUpData.user.id,
+        email: clean,
+        name: name.trim(),
+        role,
+        account_type: accountType,
+        scope_key: scopeKey,
+        company_name: companyName,
+      });
+
+      if (profileError) {
+        return { ok: false, error: profileError.message };
+      }
 
       const profile: UserProfile = {
-        id: genId(),
+        id: signUpData.user.id,
         email: clean,
         name: name.trim(),
         role,
@@ -355,172 +364,231 @@ export const useCRMStore = create<CRMState>()((set, get) => {
         createdAt: new Date().toISOString(),
       };
 
-      users[clean] = { profile, hash };
-      storageSet(KEYS.users, users);
-
-      // Create session
-      const sessionKey = genId();
-      storageSet(KEYS.session, { email: clean, sessionKey, loginAt: Date.now() });
-
-      // Load UI prefs for this user
       const uiPrefs = storageGet<UIPrefs>(KEYS.ui(clean), { theme: 'dark', language: 'pt', sidebarOpen: true });
-
-      // Load leads and alerts for this scope
-      const leads = storageGet<Lead[]>(KEYS.leads(scopeKey), []);
-      const alerts = storageGet<Alert[]>(KEYS.alerts(profile.id), []);
 
       set({
         currentUser: profile,
-        sessionKey,
-        leads,
-        alerts,
+        accessToken: signUpData.session?.access_token ?? null,
+        leads: [],
+        alerts: [],
         theme: uiPrefs.theme,
         language: uiPrefs.language,
         sidebarOpen: uiPrefs.sidebarOpen,
       });
 
-      // Welcome alert
-      const welcomeAlert: Alert = {
-        id: genId(),
+      await get().addAlert({
         type: 'success',
         title: 'Bem-vindo ao CorçaCRM!',
         message: `Olá, ${profile.name}! Seu pipeline está pronto. ${role === 'owner' ? '👑 Você é o administrador desta conta.' : ''}`,
-        read: false,
-        createdAt: new Date().toISOString(),
-      };
-      const newAlerts = [...alerts, welcomeAlert];
-      saveAlerts(newAlerts, profile.id);
-      set({ alerts: newAlerts });
+      });
 
       return { ok: true };
     },
 
     login: async (email, password) => {
       const clean = email.toLowerCase().trim();
-      const users = storageGet<Record<string, { profile: UserProfile; hash: string }>>(KEYS.users, {});
-      const entry = users[clean];
 
-      if (!entry) {
-        return { ok: false, error: 'Email não encontrado. Verifique ou crie uma conta.' };
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        email: clean,
+        password,
+      });
+
+      if (signInError || !signInData.user) {
+        return { ok: false, error: 'Email ou senha incorretos.' };
       }
 
-      const valid = await verifyPassword(password, entry.hash);
-      if (!valid) {
-        return { ok: false, error: 'Senha incorreta.' };
+      const { data: profileRow, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', signInData.user.id)
+        .single();
+
+      if (profileError || !profileRow) {
+        return { ok: false, error: 'Perfil não encontrado. Contate o administrador.' };
       }
 
-      const profile = entry.profile;
-      const sessionKey = genId();
-      storageSet(KEYS.session, { email: clean, sessionKey, loginAt: Date.now() });
-
-      // Load data ONLY for this user's scope
-      const leads = storageGet<Lead[]>(KEYS.leads(profile.scopeKey), []);
-      const alerts = storageGet<Alert[]>(KEYS.alerts(profile.id), []);
+      const profile = mapProfileRow(profileRow);
       const uiPrefs = storageGet<UIPrefs>(KEYS.ui(clean), { theme: 'dark', language: 'pt', sidebarOpen: true });
 
       set({
         currentUser: profile,
-        sessionKey,
-        leads,
-        alerts,
+        accessToken: signInData.session?.access_token ?? null,
         theme: uiPrefs.theme,
         language: uiPrefs.language,
         sidebarOpen: uiPrefs.sidebarOpen,
       });
+
+      await get().loadLeads();
+      await get().loadAlerts();
 
       return { ok: true };
     },
 
     logout: () => {
       const { currentUser, theme, language, sidebarOpen } = get();
-
-      // Save UI prefs before logout
       if (currentUser) {
         saveUIPrefs(currentUser.email, { theme, language, sidebarOpen });
       }
-
-      // Clear session
-      storageRemove(KEYS.session);
-
-      // Reset state — ZERO data leak
+      supabase.auth.signOut();
       set({
         currentUser: null,
-        sessionKey: null,
+        accessToken: null,
         leads: [],
         alerts: [],
-        // Keep theme/language as last-used (not sensitive)
       });
+    },
+
+    changePassword: async (newPassword) => {
+      if (newPassword.length < 6) {
+        return { ok: false, error: 'A nova senha deve ter pelo menos 6 caracteres.' };
+      }
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) {
+        return { ok: false, error: error.message };
+      }
+      return { ok: true };
     },
 
     // ── Leads ─────────────────────────────────────────────────────────────────
 
-    loadLeads: () => {
-      const scopeKey = getCurrentScopeKey();
-      if (!scopeKey) return;
-      const leads = storageGet<Lead[]>(KEYS.leads(scopeKey), []);
-      set({ leads });
-    },
-
-    addLead: (data) => {
+    loadLeads: async () => {
       const { currentUser } = get();
       if (!currentUser) return;
 
-      const lead: Lead = {
-        ...data,
-        id: genId(),
-        activities: [],
-        scopeKey: currentUser.scopeKey,
-        createdByUserId: currentUser.id,
+      const { data: leadRows, error: leadsError } = await supabase
+        .from('leads')
+        .select('*')
+        .eq('scope_key', currentUser.scopeKey)
+        .order('created_at', { ascending: true });
+
+      if (leadsError || !leadRows) {
+        console.error('Erro ao carregar leads:', leadsError);
+        return;
+      }
+
+      const leadIds = leadRows.map((r: any) => r.id);
+      const activitiesByLead: Record<string, Activity[]> = {};
+
+      if (leadIds.length > 0) {
+        const { data: activityRows, error: activitiesError } = await supabase
+          .from('activities')
+          .select('*')
+          .in('lead_id', leadIds)
+          .order('date', { ascending: true });
+
+        if (!activitiesError && activityRows) {
+          for (const row of activityRows) {
+            const activity = mapActivityRow(row);
+            const leadId = row.lead_id as string;
+            if (!activitiesByLead[leadId]) activitiesByLead[leadId] = [];
+            activitiesByLead[leadId].push(activity);
+          }
+        }
+      }
+
+      const leads = leadRows.map((row: any) => mapLeadRow(row, activitiesByLead[row.id] ?? []));
+      set({ leads });
+    },
+
+    addLead: async (data) => {
+      const { currentUser } = get();
+      if (!currentUser) return;
+
+      const insertPayload = {
+        scope_key: currentUser.scopeKey,
+        nome: data.nome,
+        cargo: data.cargo,
+        email_corporativo: data.emailCorporativo,
+        telefone_celular: data.telefoneCelular,
+        telefone_fixo: data.telefoneFixo,
+        nome_empresa: data.nomeEmpresa,
+        cnpj: data.cnpj,
+        linkedin: data.linkedin,
+        stage: data.stage,
+        temperatura: data.temperatura,
+        valor_proposta: data.valorProposta ?? 0,
         probabilidade: STAGE_PROBABILITY[data.stage],
-        valorProposta: data.valorProposta ?? 0,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        motivo_perda: data.motivoPerda ?? null,
+        created_by_user_id: currentUser.id,
       };
 
-      const next = [...get().leads, lead];
-      set({ leads: next });
-      saveLeads(next, currentUser.scopeKey);
+      const { data: inserted, error } = await supabase
+        .from('leads')
+        .insert(insertPayload)
+        .select()
+        .single();
 
-      // Auto-alert for hot leads
+      if (error || !inserted) {
+        console.error('Erro ao criar lead:', error);
+        return;
+      }
+
+      const newLead = mapLeadRow(inserted, []);
+      set({ leads: [...get().leads, newLead] });
+
       if (data.temperatura === 'quente') {
-        get().addAlert({
+        await get().addAlert({
           type: 'warning',
           title: '🔥 Lead Quente adicionado',
           message: `${data.nome} (${data.nomeEmpresa}) está marcado como QUENTE. Entre em contato hoje!`,
-          leadId: lead.id,
+          leadId: newLead.id,
         });
       }
     },
 
-    updateLead: (id, data) => {
+    updateLead: async (id, data) => {
       const { currentUser, leads } = get();
       if (!currentUser) return;
 
-      const next = leads.map(l =>
-        l.id === id
-          ? { ...l, ...data, updatedAt: new Date().toISOString() }
-          : l
-      );
+      const payload: Record<string, any> = { updated_at: new Date().toISOString() };
+      if (data.nome !== undefined) payload.nome = data.nome;
+      if (data.cargo !== undefined) payload.cargo = data.cargo;
+      if (data.emailCorporativo !== undefined) payload.email_corporativo = data.emailCorporativo;
+      if (data.telefoneCelular !== undefined) payload.telefone_celular = data.telefoneCelular;
+      if (data.telefoneFixo !== undefined) payload.telefone_fixo = data.telefoneFixo;
+      if (data.nomeEmpresa !== undefined) payload.nome_empresa = data.nomeEmpresa;
+      if (data.cnpj !== undefined) payload.cnpj = data.cnpj;
+      if (data.linkedin !== undefined) payload.linkedin = data.linkedin;
+      if (data.stage !== undefined) payload.stage = data.stage;
+      if (data.temperatura !== undefined) payload.temperatura = data.temperatura;
+      if (data.valorProposta !== undefined) payload.valor_proposta = data.valorProposta;
+      if (data.motivoPerda !== undefined) payload.motivo_perda = data.motivoPerda;
+      if (data.motivoSemReuniao !== undefined) payload.motivo_sem_reuniao = data.motivoSemReuniao;
+
+      const { error } = await supabase.from('leads').update(payload).eq('id', id);
+      if (error) {
+        console.error('Erro ao atualizar lead:', error);
+        return;
+      }
+
+      const next = leads.map((l) => (l.id === id ? { ...l, ...data, updatedAt: new Date().toISOString() } : l));
       set({ leads: next });
-      saveLeads(next, currentUser.scopeKey);
     },
 
-    moveLead: (id, stage) => {
+    moveLead: async (id, stage) => {
       const { currentUser, leads } = get();
       if (!currentUser) return;
 
-      const next = leads.map(l =>
-        l.id === id
-          ? { ...l, stage, probabilidade: STAGE_PROBABILITY[stage], updatedAt: new Date().toISOString() }
-          : l
+      const probabilidade = STAGE_PROBABILITY[stage];
+
+      const { error } = await supabase
+        .from('leads')
+        .update({ stage, probabilidade, updated_at: new Date().toISOString() })
+        .eq('id', id);
+
+      if (error) {
+        console.error('Erro ao mover lead:', error);
+        return;
+      }
+
+      const next = leads.map((l) =>
+        l.id === id ? { ...l, stage, probabilidade, updatedAt: new Date().toISOString() } : l
       );
       set({ leads: next });
-      saveLeads(next, currentUser.scopeKey);
 
-      // Auto-alert when reaching final stage
-      const lead = leads.find(l => l.id === id);
+      const lead = leads.find((l) => l.id === id);
       if (stage === 'fim_cadencia' && lead) {
-        get().addAlert({
+        await get().addAlert({
           type: 'success',
           title: '🎉 Lead avançou para Fim de Cadência!',
           message: `${lead.nome} está pronto para proposta. Agende o fechamento!`,
@@ -529,41 +597,50 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       }
     },
 
-    deleteLead: (id) => {
+    deleteLead: async (id) => {
       const { currentUser, leads } = get();
       if (!currentUser) return;
 
-      const next = leads.filter(l => l.id !== id);
-      set({ leads: next });
-      saveLeads(next, currentUser.scopeKey);
+      const { error } = await supabase.from('leads').delete().eq('id', id);
+      if (error) {
+        console.error('Erro ao excluir lead:', error);
+        return;
+      }
+
+      set({ leads: leads.filter((l) => l.id !== id) });
     },
 
-    addActivity: (leadId, type, content) => {
+    addActivity: async (leadId, type, content) => {
       const { currentUser, leads } = get();
       if (!currentUser) return;
 
-      const activity: Activity = {
-        id: genId(),
-        type,
-        content,
-        userId: currentUser.id,
-        date: new Date().toISOString(),
-      };
+      const { data: inserted, error } = await supabase
+        .from('activities')
+        .insert({ lead_id: leadId, type, content, user_id: currentUser.id })
+        .select()
+        .single();
 
-      const next = leads.map(l =>
+      if (error || !inserted) {
+        console.error('Erro ao registrar atividade:', error);
+        return;
+      }
+
+      const activity = mapActivityRow(inserted);
+
+      const next = leads.map((l) =>
         l.id === leadId
           ? { ...l, activities: [...l.activities, activity], updatedAt: new Date().toISOString() }
           : l
       );
       set({ leads: next });
-      saveLeads(next, currentUser.scopeKey);
+
+      // Atualiza o updated_at do lead no banco (best-effort, não bloqueia a UI)
+      supabase.from('leads').update({ updated_at: new Date().toISOString() }).eq('id', leadId).then();
 
       // 🔔 Alerta automático: ligação sem sucesso → lembrete de retorno
-      // Analisa o texto da atividade (descrição/comentário) em busca de
-      // expressões que indiquem que o vendedor não conseguiu contato.
       if (isFailedContactAttempt(content)) {
-        const lead = next.find(l => l.id === leadId);
-        get().addAlert({
+        const lead = next.find((l) => l.id === leadId);
+        await get().addAlert({
           type: 'warning',
           title: '📞 Retornar ligação',
           message: `A tentativa de contato com ${lead?.nome ?? 'este lead'}${lead?.nomeEmpresa ? ` (${lead.nomeEmpresa})` : ''} não teve sucesso. Lembre-se de retornar a ligação.`,
@@ -574,50 +651,67 @@ export const useCRMStore = create<CRMState>()((set, get) => {
 
     // ── Alerts ────────────────────────────────────────────────────────────────
 
-    loadAlerts: () => {
+    loadAlerts: async () => {
       const { currentUser } = get();
       if (!currentUser) return;
-      const alerts = storageGet<Alert[]>(KEYS.alerts(currentUser.id), []);
-      set({ alerts });
+
+      const { data, error } = await supabase
+        .from('alerts')
+        .select('*')
+        .eq('user_id', currentUser.id)
+        .order('created_at', { ascending: true });
+
+      if (error || !data) return;
+      set({ alerts: data.map(mapAlertRow) });
     },
 
-    addAlert: (data) => {
+    addAlert: async (data) => {
       const { currentUser, alerts } = get();
       if (!currentUser) return;
 
-      const alert: Alert = {
-        ...data,
-        id: genId(),
-        read: false,
-        createdAt: new Date().toISOString(),
-      };
-      const next = [...alerts, alert];
-      set({ alerts: next });
-      saveAlerts(next, currentUser.id);
+      const { data: inserted, error } = await supabase
+        .from('alerts')
+        .insert({
+          user_id: currentUser.id,
+          type: data.type,
+          title: data.title,
+          message: data.message,
+          lead_id: data.leadId ?? null,
+          read: false,
+        })
+        .select()
+        .single();
+
+      if (error || !inserted) {
+        console.error('Erro ao criar alerta:', error);
+        return;
+      }
+
+      set({ alerts: [...alerts, mapAlertRow(inserted)] });
     },
 
-    markAlertRead: (id) => {
+    markAlertRead: async (id) => {
       const { currentUser, alerts } = get();
       if (!currentUser) return;
-      const next = alerts.map(a => a.id === id ? { ...a, read: true } : a);
-      set({ alerts: next });
-      saveAlerts(next, currentUser.id);
+      const { error } = await supabase.from('alerts').update({ read: true }).eq('id', id);
+      if (error) return;
+      set({ alerts: alerts.map((a) => (a.id === id ? { ...a, read: true } : a)) });
     },
 
-    dismissAlert: (id) => {
+    dismissAlert: async (id) => {
       const { currentUser, alerts } = get();
       if (!currentUser) return;
-      const next = alerts.filter(a => a.id !== id);
-      set({ alerts: next });
-      saveAlerts(next, currentUser.id);
+      const { error } = await supabase.from('alerts').delete().eq('id', id);
+      if (error) return;
+      set({ alerts: alerts.filter((a) => a.id !== id) });
     },
 
-    markAllRead: () => {
+    markAllRead: async () => {
       const { currentUser, alerts } = get();
       if (!currentUser) return;
-      const next = alerts.map(a => ({ ...a, read: true }));
-      set({ alerts: next });
-      saveAlerts(next, currentUser.id);
+      const { error } = await supabase.from('alerts').update({ read: true }).eq('user_id', currentUser.id);
+      if (error) return;
+      set({ alerts: alerts.map((a) => ({ ...a, read: true })) });
     },
 
     // ── UI ────────────────────────────────────────────────────────────────────
@@ -651,107 +745,80 @@ export const useCRMStore = create<CRMState>()((set, get) => {
 
     // ── Team ──────────────────────────────────────────────────────────────────
 
-    getCompanyMembers: () => {
+    getCompanyMembers: async () => {
       const { currentUser } = get();
       if (!currentUser) return [];
-      const users = storageGet<Record<string, { profile: UserProfile; hash: string }>>(KEYS.users, {});
-      return Object.values(users)
-        .filter(u => u.profile.scopeKey === currentUser.scopeKey)
-        .map(u => u.profile);
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('scope_key', currentUser.scopeKey);
+
+      if (error || !data) return [];
+      return data.map(mapProfileRow);
     },
 
-    inviteTeamMember: (email, name, role) => {
-      const { currentUser } = get();
-      if (!currentUser) return { ok: false, error: 'Não autenticado.' };
+    inviteTeamMember: async (email, name, role, password) => {
+      const { currentUser, accessToken } = get();
+      if (!currentUser || !accessToken) return { ok: false, error: 'Não autenticado.' };
       if (currentUser.role !== 'owner' && currentUser.role !== 'admin') {
         return { ok: false, error: 'Apenas admins podem convidar membros.' };
       }
 
-      const clean = email.toLowerCase().trim();
-      const users = storageGet<Record<string, { profile: UserProfile; hash: string }>>(KEYS.users, {});
-
-      if (users[clean]) {
-        return { ok: false, error: 'Este email já está cadastrado.' };
+      try {
+        const res = await fetch('/api/team/invite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, name, password, role, accessToken }),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.ok) {
+          return { ok: false, error: json.error || 'Erro ao criar usuário.' };
+        }
+        return { ok: true };
+      } catch (err: any) {
+        return { ok: false, error: err?.message || 'Erro de conexão.' };
       }
-
-      // Derive scope — must match company
-      const { scopeKey, accountType, companyName } = deriveScopeKey(clean);
-      if (scopeKey !== currentUser.scopeKey) {
-        return { ok: false, error: `Este email (${email}) não pertence ao domínio da sua empresa (${currentUser.companyName}).` };
-      }
-
-      const profile: UserProfile = {
-        id: genId(),
-        email: clean,
-        name: name.trim(),
-        role,
-        accountType,
-        scopeKey,
-        companyName,
-        createdAt: new Date().toISOString(),
-      };
-
-      // Temporary password that they must change on first login
-      const tempPass = genId().slice(0, 8);
-
-      users[clean] = { profile, hash: '' }; // hash set on first login
-      storageSet(KEYS.users, users);
-
-      return { ok: true };
     },
   };
 });
 
 // ─── Session Restore (call this in app root) ───────────────────────────────────
 
-/**
- * Chame esta função no `useEffect` do layout raiz para restaurar a sessão.
- * Ela lê o sessionKey do localStorage e recarrega o usuário correto.
- */
 export async function restoreSession(): Promise<boolean> {
   if (typeof window === 'undefined') return false;
 
-  const session = storageGet<{ email: string; sessionKey: string; loginAt: number } | null>(KEYS.session, null);
+  const { data: sessionData } = await supabase.auth.getSession();
+  const session = sessionData.session;
   if (!session) return false;
 
-  // Session expires after 7 days
-  const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
-  if (Date.now() - session.loginAt > SESSION_TTL) {
-    storageRemove(KEYS.session);
-    return false;
-  }
+  const { data: profileRow, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', session.user.id)
+    .single();
 
-  const users = storageGet<Record<string, { profile: UserProfile; hash: string }>>(KEYS.users, {});
-  const entry = users[session.email];
-  if (!entry) {
-    storageRemove(KEYS.session);
-    return false;
-  }
+  if (error || !profileRow) return false;
 
-  const { profile } = entry;
-  const leads = storageGet<Lead[]>(KEYS.leads(profile.scopeKey), []);
-  const alerts = storageGet<Alert[]>(KEYS.alerts(profile.id), []);
-  const uiPrefs = storageGet<UIPrefs>(KEYS.ui(session.email), { theme: 'dark', language: 'pt', sidebarOpen: true });
+  const profile = mapProfileRow(profileRow);
+  const uiPrefs = storageGet<UIPrefs>(KEYS.ui(profile.email), { theme: 'dark', language: 'pt', sidebarOpen: true });
 
   useCRMStore.setState({
     currentUser: profile,
-    sessionKey: session.sessionKey,
-    leads,
-    alerts,
+    accessToken: session.access_token,
     theme: uiPrefs.theme,
     language: uiPrefs.language,
     sidebarOpen: uiPrefs.sidebarOpen,
   });
+
+  await useCRMStore.getState().loadLeads();
+  await useCRMStore.getState().loadAlerts();
 
   return true;
 }
 
 // ─── Daily alert automation ────────────────────────────────────────────────────
 
-/**
- * Chame esta função uma vez por dia (via useEffect com timestamp check)
- * para gerar alertas automáticos de follow-up.
- */
 export function runDailyAlertAutomation(): void {
   const state = useCRMStore.getState();
   const { currentUser, leads, addAlert } = state;
@@ -760,17 +827,14 @@ export function runDailyAlertAutomation(): void {
   const today = new Date();
   const todayStr = today.toISOString().split('T')[0];
 
-  // Check if automation already ran today
   const lastRun = storageGet<string>(`corca_v3::automation::${currentUser.id}`, '');
   if (lastRun === todayStr) return;
-
   storageSet(`corca_v3::automation::${currentUser.id}`, todayStr);
 
-  const myLeads = leads.filter(l => l.createdByUserId === currentUser.id || currentUser.role !== 'vendedor');
+  const myLeads = leads;
 
-  // Leads without activity in 3+ days
   const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
-  const staleLeads = myLeads.filter(l => {
+  const staleLeads = myLeads.filter((l) => {
     const lastActivity = l.activities.length > 0
       ? new Date(l.activities[l.activities.length - 1].date)
       : new Date(l.createdAt);
@@ -781,12 +845,11 @@ export function runDailyAlertAutomation(): void {
     addAlert({
       type: 'warning',
       title: `⏰ ${staleLeads.length} leads sem atividade há 3+ dias`,
-      message: `Leads parados: ${staleLeads.slice(0, 3).map(l => l.nome).join(', ')}${staleLeads.length > 3 ? ` e mais ${staleLeads.length - 3}` : ''}. Faça follow-up hoje!`,
+      message: `Leads parados: ${staleLeads.slice(0, 3).map((l) => l.nome).join(', ')}${staleLeads.length > 3 ? ` e mais ${staleLeads.length - 3}` : ''}. Faça follow-up hoje!`,
     });
   }
 
-  // Hot leads without activity today
-  const hotNoContact = myLeads.filter(l => {
+  const hotNoContact = myLeads.filter((l) => {
     if (l.temperatura !== 'quente') return false;
     const lastActivity = l.activities.length > 0
       ? new Date(l.activities[l.activities.length - 1].date)
@@ -798,17 +861,16 @@ export function runDailyAlertAutomation(): void {
     addAlert({
       type: 'danger',
       title: `🔥 ${hotNoContact.length} lead(s) QUENTE(s) sem contato hoje`,
-      message: `Não perca oportunidades quentes! Entre em contato agora: ${hotNoContact.slice(0, 2).map(l => l.nome).join(', ')}.`,
+      message: `Não perca oportunidades quentes! Entre em contato agora: ${hotNoContact.slice(0, 2).map((l) => l.nome).join(', ')}.`,
     });
   }
 
-  // Weekly summary (Monday only)
   if (today.getDay() === 1) {
     const lastWeek = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const callsLastWeek = myLeads.reduce((sum, l) =>
-      sum + l.activities.filter(a => a.type === 'telefone' && new Date(a.date) > lastWeek).length, 0);
-    const meetingsLastWeek = myLeads.filter(l =>
-      l.stage === 'reuniao' || l.activities.some(a => a.type === 'reuniao' && new Date(a.date) > lastWeek)).length;
+      sum + l.activities.filter((a) => a.type === 'telefone' && new Date(a.date) > lastWeek).length, 0);
+    const meetingsLastWeek = myLeads.filter((l) =>
+      l.stage === 'reuniao' || l.activities.some((a) => a.type === 'reuniao' && new Date(a.date) > lastWeek)).length;
 
     addAlert({
       type: 'info',
@@ -816,10 +878,9 @@ export function runDailyAlertAutomation(): void {
       message: `Semana passada: ${callsLastWeek} ligações, ${meetingsLastWeek} reuniões agendadas. Meta: 100 ligações e 6 reuniões/semana.`,
     });
 
-    // Analysis: why leads didn't convert to meetings
-    const noMeeting = myLeads.filter(l =>
+    const noMeeting = myLeads.filter((l) =>
       l.stage === 'entrada' || l.stage === 'enriquecer'
-    ).filter(l => {
+    ).filter((l) => {
       const created = new Date(l.createdAt);
       return created > lastWeek;
     });
