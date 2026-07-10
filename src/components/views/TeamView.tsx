@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTranslation } from '@/src/lib/useTranslation';
-import { useCRMStore } from '@/src/store/crmStore';
+import { useCRMStore, type UserProfile } from '@/src/store/crmStore';
 import { Card, CardContent } from '@/components/ui/card';
 import { Users, Mail, Crown, User, UserPlus, AlertCircle, CheckCircle } from 'lucide-react';
 
@@ -13,30 +13,63 @@ export function TeamView() {
   const inviteTeamMember = useCRMStore((s) => s.inviteTeamMember);
   const leads = useCRMStore((s) => s.leads);
 
+  const [companyUsers, setCompanyUsers] = useState<UserProfile[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(true);
+
   const [nomeVendedor, setNomeVendedor] = useState('');
   const [emailVendedor, setEmailVendedor] = useState('');
+  const [senhaVendedor, setSenhaVendedor] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const companyUsers = getCompanyMembers();
   const isAdmin = currentUser?.role === 'owner' || currentUser?.role === 'admin';
 
-  const handleCreateVendedor = (e: React.FormEvent) => {
+  const refreshMembers = async () => {
+    setLoadingUsers(true);
+    const members = await getCompanyMembers();
+    setCompanyUsers(members);
+    setLoadingUsers(false);
+  };
+
+  useEffect(() => {
+    refreshMembers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleCreateVendedor = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatusMsg(null);
 
-    if (!nomeVendedor || !emailVendedor) {
+    if (!nomeVendedor || !emailVendedor || !senhaVendedor) {
       setStatusMsg({ type: 'error', text: 'Preencha todos os campos obrigatórios.' });
       return;
     }
 
-    const result = inviteTeamMember(emailVendedor.trim().toLowerCase(), nomeVendedor, 'vendedor');
+    if (senhaVendedor.length < 6) {
+      setStatusMsg({ type: 'error', text: 'A senha deve ter pelo menos 6 caracteres.' });
+      return;
+    }
+
+    setSubmitting(true);
+    const result = await inviteTeamMember(
+      emailVendedor.trim().toLowerCase(),
+      nomeVendedor,
+      'vendedor',
+      senhaVendedor
+    );
+    setSubmitting(false);
 
     if (result.ok) {
-      setStatusMsg({ type: 'success', text: `${nomeVendedor} foi convidado com sucesso!` });
+      setStatusMsg({
+        type: 'success',
+        text: `${nomeVendedor} foi criado com sucesso! Ele já pode entrar com o e-mail e a senha definidos.`,
+      });
       setNomeVendedor('');
       setEmailVendedor('');
+      setSenhaVendedor('');
+      refreshMembers();
     } else {
-      setStatusMsg({ type: 'error', text: result.error || 'Erro ao convidar membro.' });
+      setStatusMsg({ type: 'error', text: result.error || 'Erro ao criar membro.' });
     }
   };
 
@@ -62,7 +95,7 @@ export function TeamView() {
             <CardContent className="p-5 space-y-4">
               <div className="flex items-center gap-2">
                 <UserPlus className="w-5 h-5 text-primary" />
-                <h3 className="font-bold text-sm">Convidar Vendedor</h3>
+                <h3 className="font-bold text-sm">Criar Vendedor</h3>
               </div>
               <p className="text-xs text-muted-foreground leading-relaxed">
                 Crie acessos exclusivos para que outros vendedores da sua equipe gerenciem leads e batam metas.
@@ -79,7 +112,7 @@ export function TeamView() {
                     <div className={`p-2.5 text-xs font-semibold rounded-lg border flex items-center gap-1.5 justify-center ${
                       statusMsg.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' : 'bg-destructive/10 border-destructive/20 text-destructive'
                     }`}>
-                      {statusMsg.type === 'success' ? <CheckCircle className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
+                      {statusMsg.type === 'success' ? <CheckCircle className="w-3.5 h-3.5 shrink-0" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0" />}
                       <span>{statusMsg.text}</span>
                     </div>
                   )}
@@ -108,12 +141,29 @@ export function TeamView() {
                     />
                   </div>
 
-                  <div className="text-[10px] text-muted-foreground bg-secondary/30 p-2 rounded-lg border border-border/40">
-                    O membro deverá fazer o primeiro login com seu email e uma nova senha.
+                  <div>
+                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Senha Inicial</label>
+                    <input
+                      type="password"
+                      required
+                      minLength={6}
+                      value={senhaVendedor}
+                      onChange={(e) => setSenhaVendedor(e.target.value)}
+                      placeholder="Mínimo 6 caracteres"
+                      className="w-full mt-1 p-2 rounded-lg bg-secondary/50 border border-border text-xs focus:outline-none focus:border-primary transition"
+                    />
                   </div>
 
-                  <button type="submit" className="w-full py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-lg transition shadow-sm">
-                    Adicionar à Empresa
+                  <div className="text-[10px] text-muted-foreground bg-secondary/30 p-2 rounded-lg border border-border/40">
+                    O vendedor poderá entrar imediatamente com esse e-mail e senha, e depois trocar a senha em Configurações.
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="w-full py-2 bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground font-semibold text-xs rounded-lg transition shadow-sm"
+                  >
+                    {submitting ? 'Criando...' : 'Adicionar à Empresa'}
                   </button>
                 </form>
               )}
@@ -122,7 +172,13 @@ export function TeamView() {
         </div>
 
         <div className="lg:col-span-2">
-          {companyUsers.length === 0 ? (
+          {loadingUsers ? (
+            <Card>
+              <CardContent className="py-16 text-center text-muted-foreground text-sm">
+                Carregando membros...
+              </CardContent>
+            </Card>
+          ) : companyUsers.length === 0 ? (
             <Card>
               <CardContent className="py-16 text-center text-muted-foreground">
                 <Users className="w-10 h-10 mx-auto mb-3 opacity-40" />
