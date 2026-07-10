@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { Mail, Lock, User, ArrowRight, CheckCircle2, Sparkles } from 'lucide-react';
 import { useCRMStore } from '@/src/store/crmStore';
+import { supabase } from '@/src/lib/supabaseClient';
 
 export default function Home() {
   const [isLogin, setIsLogin] = useState(true);
@@ -17,17 +18,13 @@ export default function Home() {
   const login = useCRMStore((s) => s.login);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const session = localStorage.getItem('corca_v3::session');
-      if (session) {
-        try {
-          const parsed = JSON.parse(session);
-          if (parsed?.email && parsed?.sessionKey) {
-            window.location.href = '/app';
-          }
-        } catch { /* invalid session */ }
+    if (typeof window === 'undefined') return;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) {
+        window.location.href = '/app';
       }
-    }
+    });
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
