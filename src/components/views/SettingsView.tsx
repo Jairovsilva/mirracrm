@@ -1,10 +1,11 @@
 'use client';
 
+import { useState } from 'react';
 import { useTranslation } from '@/src/lib/useTranslation';
 import { useCRMStore } from '@/src/store/crmStore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Moon, Sun, Globe, Building2, Mail, Crown, LogOut } from 'lucide-react';
+import { Moon, Sun, Globe, Building2, Mail, Crown, LogOut, KeyRound, AlertCircle, CheckCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export function SettingsView() {
@@ -15,10 +16,46 @@ export function SettingsView() {
   const currentLanguage = useCRMStore((s) => s.language);
   const currentUser = useCRMStore((s) => s.currentUser);
   const logout = useCRMStore((s) => s.logout);
+  const changePassword = useCRMStore((s) => s.changePassword);
+
+  const [novaSenha, setNovaSenha] = useState('');
+  const [confirmarSenha, setConfirmarSenha] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [passwordMsg, setPasswordMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const handleLogout = () => {
     logout();
     window.location.href = '/';
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordMsg(null);
+
+    if (!novaSenha || !confirmarSenha) {
+      setPasswordMsg({ type: 'error', text: 'Preencha os dois campos.' });
+      return;
+    }
+    if (novaSenha.length < 6) {
+      setPasswordMsg({ type: 'error', text: 'A nova senha deve ter pelo menos 6 caracteres.' });
+      return;
+    }
+    if (novaSenha !== confirmarSenha) {
+      setPasswordMsg({ type: 'error', text: 'As senhas não coincidem.' });
+      return;
+    }
+
+    setChangingPassword(true);
+    const result = await changePassword(novaSenha);
+    setChangingPassword(false);
+
+    if (result.ok) {
+      setPasswordMsg({ type: 'success', text: 'Senha alterada com sucesso!' });
+      setNovaSenha('');
+      setConfirmarSenha('');
+    } else {
+      setPasswordMsg({ type: 'error', text: result.error || 'Erro ao alterar a senha.' });
+    }
   };
 
   return (
@@ -60,6 +97,61 @@ export function SettingsView() {
               <span className="font-medium">{currentUser?.companyName}</span>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Change password */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <KeyRound className="w-4 h-4" />
+            Alterar Senha
+          </CardTitle>
+          <CardDescription>Defina uma nova senha pessoal para sua conta</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleChangePassword} className="space-y-3 max-w-sm">
+            {passwordMsg && (
+              <div className={`p-2.5 text-xs font-semibold rounded-lg border flex items-center gap-1.5 ${
+                passwordMsg.type === 'success'
+                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500'
+                  : 'bg-destructive/10 border-destructive/20 text-destructive'
+              }`}>
+                {passwordMsg.type === 'success' ? <CheckCircle className="w-3.5 h-3.5 shrink-0" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0" />}
+                <span>{passwordMsg.text}</span>
+              </div>
+            )}
+
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Nova senha</label>
+              <input
+                type="password"
+                required
+                minLength={6}
+                value={novaSenha}
+                onChange={(e) => setNovaSenha(e.target.value)}
+                placeholder="Mínimo 6 caracteres"
+                className="w-full mt-1 h-10 px-3 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Confirmar nova senha</label>
+              <input
+                type="password"
+                required
+                minLength={6}
+                value={confirmarSenha}
+                onChange={(e) => setConfirmarSenha(e.target.value)}
+                placeholder="Repita a nova senha"
+                className="w-full mt-1 h-10 px-3 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+
+            <Button type="submit" disabled={changingPassword} className="w-full sm:w-auto">
+              {changingPassword ? 'Salvando...' : 'Salvar nova senha'}
+            </Button>
+          </form>
         </CardContent>
       </Card>
 
