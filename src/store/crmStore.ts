@@ -2,17 +2,6 @@
 
 /**
  * CorçaCRM — Store v4 (Supabase — persistência real entre navegadores/dispositivos)
- *
- * ARQUITETURA:
- * - Autenticação e dados agora vivem no Supabase (Postgres + Auth), não mais no localStorage.
- * - A visibilidade de leads é garantida em duas camadas:
- *   1) Row Level Security no banco (fonte da verdade — não pode ser burlada pelo cliente)
- *   2) Os selects já vêm filtrados: owner/admin recebem todos os leads da empresa,
- *      vendedor recebe apenas os leads que ele mesmo criou.
- * - Preferências de UI (tema/idioma) continuam no localStorage por serem dados
- *   não sensíveis e não precisarem sincronizar entre dispositivos.
- * - A interface pública do store (nomes de funções e campos) foi mantida igual
- *   à versão anterior — nenhum componente que consome o store precisa mudar.
  */
 
 import { create } from 'zustand';
@@ -258,9 +247,10 @@ interface CRMState {
   alerts: Alert[];
 
   // ── Auth ────────────────────────────────────────────────────────────────
-  register: (email: string, password: string, name: string) => Promise<{ ok: boolean; error?: string }>;
+  // ── ALTERADO: adicionado "needsConfirmation?" no retorno ──
+  register: (email: string, password: string, name: string) => Promise<{ ok: boolean; error?: string; needsConfirmation?: boolean }>;
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
-  logout: () => Promise<void>; // <-- ALTERADO: antes era "() => void"
+  logout: () => Promise<void>;
   changePassword: (newPassword: string) => Promise<{ ok: boolean; error?: string }>;
 
   // ── Leads ───────────────────────────────────────────────────────────────
@@ -308,6 +298,12 @@ export const useCRMStore = create<CRMState>()((set, get) => {
 
     // ── Auth ──────────────────────────────────────────────────────────────────
 
+    // ── ALTERADO: register agora NUNCA insere manualmente em "profiles".
+    // O papel (owner/vendedor) e os demais dados são calculados ANTES do
+    // cadastro e enviados como metadata para o signUp. É o gatilho do banco
+    // (handle_new_user, com SECURITY DEFINER) quem cria a linha em "profiles"
+    // usando essa metadata — funciona igual, esteja a confirmação de e-mail
+    // ligada ou desligada, sem nunca esbarrar em RLS. ──
     register: async (email, password, name) => {
       const clean = email.toLowerCase().trim();
 
@@ -323,9 +319,21 @@ export const useCRMStore = create<CRMState>()((set, get) => {
 
       const { scopeKey, accountType, companyName } = deriveScopeKey(clean);
 
+      const { data: countInScope } = await supabase.rpc('count_profiles_in_scope', { p_scope_key: scopeKey });
+      const role: UserRole = (countInScope ?? 0) === 0 ? 'owner' : 'vendedor';
+
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: clean,
         password,
+        options: {
+          data: {
+            name: name.trim(),
+            role,
+            account_type: accountType,
+            scope_key: scopeKey,
+            company_name: companyName,
+          },
+        },
       });
 
       if (signUpError || !signUpData.user) {
@@ -336,39 +344,31 @@ export const useCRMStore = create<CRMState>()((set, get) => {
         return { ok: false, error: signUpError?.message || 'Erro ao cadastrar.' };
       }
 
-      const { data: countInScope } = await supabase.rpc('count_profiles_in_scope', { p_scope_key: scopeKey });
-      const role: UserRole = (countInScope ?? 0) === 0 ? 'owner' : 'vendedor';
-
-      const { error: profileError } = await supabase.from('profiles').insert({
-        id: signUpData.user.id,
-        email: clean,
-        name: name.trim(),
-        role,
-        account_type: accountType,
-        scope_key: scopeKey,
-        company_name: companyName,
-      });
-
-      if (profileError) {
-        return { ok: false, error: profileError.message };
+      // Sem sessão ativa = confirmação de e-mail está exigida pelo Supabase.
+      // O perfil já foi criado pelo gatilho do banco (com os dados corretos,
+      // via metadata acima) — não há nada mais a fazer aqui além de avisar
+      // o usuário para confirmar o e-mail antes de entrar.
+      if (!signUpData.session) {
+        return { ok: true, needsConfirmation: true };
       }
 
-      const profile: UserProfile = {
-        id: signUpData.user.id,
-        email: clean,
-        name: name.trim(),
-        role,
-        accountType,
-        scopeKey,
-        companyName,
-        createdAt: new Date().toISOString(),
-      };
+      // Com sessão ativa, só LEMOS o perfil que o gatilho já criou — nunca inserimos.
+      const { data: profileRow, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', signUpData.user.id)
+        .single();
 
+      if (profileError || !profileRow) {
+        return { ok: false, error: 'Cadastro criado, mas não foi possível carregar o perfil. Tente fazer login.' };
+      }
+
+      const profile = mapProfileRow(profileRow);
       const uiPrefs = storageGet<UIPrefs>(KEYS.ui(clean), { theme: 'dark', language: 'pt', sidebarOpen: true });
 
       set({
         currentUser: profile,
-        accessToken: signUpData.session?.access_token ?? null,
+        accessToken: signUpData.session.access_token,
         leads: [],
         alerts: [],
         theme: uiPrefs.theme,
@@ -424,20 +424,23 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       return { ok: true };
     },
 
-    // ── ALTERADO: "logout: () =>" virou "logout: async () =>",
-    // e "supabase.auth.signOut();" agora tem "await" na frente ──
     logout: async () => {
       const { currentUser, theme, language, sidebarOpen } = get();
       if (currentUser) {
         saveUIPrefs(currentUser.email, { theme, language, sidebarOpen });
       }
-      await supabase.auth.signOut();
+      await supabase.auth.signOut({ scope: 'global' });
       set({
         currentUser: null,
         accessToken: null,
         leads: [],
         alerts: [],
       });
+      if (typeof window !== 'undefined') {
+        Object.keys(localStorage)
+          .filter((key) => key.startsWith('sb-') || key.includes('supabase'))
+          .forEach((key) => localStorage.removeItem(key));
+      }
     },
 
     changePassword: async (newPassword) => {
@@ -636,10 +639,8 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       );
       set({ leads: next });
 
-      // Atualiza o updated_at do lead no banco (best-effort, não bloqueia a UI)
       supabase.from('leads').update({ updated_at: new Date().toISOString() }).eq('id', leadId).then();
 
-      // 🔔 Alerta automático: ligação sem sucesso → lembrete de retorno
       if (isFailedContactAttempt(content)) {
         const lead = next.find((l) => l.id === leadId);
         await get().addAlert({
