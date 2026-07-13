@@ -260,7 +260,7 @@ interface CRMState {
   // ── Auth ────────────────────────────────────────────────────────────────
   register: (email: string, password: string, name: string) => Promise<{ ok: boolean; error?: string }>;
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
-  logout: () => void;
+  logout: () => Promise<void>; // <-- ALTERADO: antes era "() => void"
   changePassword: (newPassword: string) => Promise<{ ok: boolean; error?: string }>;
 
   // ── Leads ───────────────────────────────────────────────────────────────
@@ -424,12 +424,14 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       return { ok: true };
     },
 
-    logout: () => {
+    // ── ALTERADO: "logout: () =>" virou "logout: async () =>",
+    // e "supabase.auth.signOut();" agora tem "await" na frente ──
+    logout: async () => {
       const { currentUser, theme, language, sidebarOpen } = get();
       if (currentUser) {
         saveUIPrefs(currentUser.email, { theme, language, sidebarOpen });
       }
-      supabase.auth.signOut();
+      await supabase.auth.signOut();
       set({
         currentUser: null,
         accessToken: null,
