@@ -1,7 +1,7 @@
 'use client';
 import React, { useRef, useState } from 'react';
 import { useCRMStore, type Stage } from '@/src/store/crmStore';
-import { FileSpreadsheet, Trash2, GripVertical, Search, X } from 'lucide-react';
+import { FileSpreadsheet, Trash2, GripVertical, Search, X, CheckSquare, Square, ListChecks } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 interface KanbanViewProps {
@@ -12,24 +12,55 @@ interface KanbanViewProps {
 
 export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: KanbanViewProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { addLead, moveLead, deleteLead, theme, leads } = useCRMStore();
+  const { addLead, moveLead, deleteLead, deleteLeads, theme, leads } = useCRMStore();
   const [isProcessing, setIsProcessing] = useState(false);
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<Stage | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // 🎯 FILTRO CORRIGIDO: Utiliza a inteligência de escopo nativa da Store por Empresa/Usuário
+  // 🆕 Modo de seleção múltipla para exclusão em massa
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isDeleting, setIsDeleting] = useState(false);
+
   const myLeads = leads;
+
+  const toggleSelectionMode = () => {
+    setSelectionMode((prev) => !prev);
+    setSelectedIds(new Set());
+  };
+
+  const toggleLeadSelected = (leadId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(leadId)) {
+        next.delete(leadId);
+      } else {
+        next.add(leadId);
+      }
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    const confirmMsg = `Excluir ${selectedIds.size} lead(s) selecionado(s)? Essa ação não pode ser desfeita.`;
+    if (!confirm(confirmMsg)) return;
+
+    setIsDeleting(true);
+    await deleteLeads(Array.from(selectedIds));
+    setIsDeleting(false);
+    setSelectedIds(new Set());
+    setSelectionMode(false);
+  };
 
   const mapRowToLead = (row: any) => {
     const keys = Object.keys(row);
 
-    // Remove acentos corretamente (NFD) antes de limpar caracteres especiais.
-    // Isso evita que "Razão Social" vire "razosocial" em vez de "razaosocial".
     const normalize = (str: string) =>
       str
         .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '') // remove acentos (ã, ç, é, etc.)
+        .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase()
         .trim()
         .replace(/[^a-z0-9]/g, '');
@@ -37,11 +68,8 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
     const findValue = (possibleNames: string[]) => {
       const normalizedNames = possibleNames.map(normalize);
 
-      // 1) tenta bater exatamente com o header normalizado
       let foundKey = keys.find((k) => normalizedNames.includes(normalize(k)));
 
-      // 2) fallback: aceita correspondência parcial (contém)
-      //    cobre casos como "Nome Completo", "Cargo/Função", "Telefone Celular"
       if (!foundKey) {
         foundKey = keys.find((k) => {
           const nk = normalize(k);
@@ -130,6 +158,7 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
   };
 
   const handleDragStart = (e: React.DragEvent, leadId: string) => {
+    if (selectionMode) return;
     setDraggedLeadId(leadId);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', leadId);
@@ -178,19 +207,64 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-2xl font-black tracking-tight">Pipeline de Vendas B2B</h1>
-            <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>Arraste os cards entre as etapas ou clique para abrir o detalhe do lead.</p>
+            <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
+              {selectionMode
+                ? 'Clique nos cards para selecionar os leads que deseja excluir.'
+                : 'Arraste os cards entre as etapas ou clique para abrir o detalhe do lead.'}
+            </p>
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
-            <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".xlsx, .xls" className="hidden" />
-            <button
-              type="button"
-              disabled={isProcessing}
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-lg transition-all disabled:opacity-50 whitespace-nowrap"
-            >
-              {isProcessing ? 'Mapeando...' : <> <FileSpreadsheet className="w-4 h-4" /> Importar Lista de Contatos </>}
-            </button>
+            {!selectionMode ? (
+              <>
+                <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".xlsx, .xls" className="hidden" />
+                <button
+                  type="button"
+                  onClick={toggleSelectionMode}
+                  className={`flex items-center gap-2 font-bold text-xs py-2.5 px-4 rounded-xl shadow-sm transition-all whitespace-nowrap border ${
+                    theme === 'dark'
+                      ? 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <ListChecks className="w-4 h-4" /> Selecionar
+                </button>
+                <button
+                  type="button"
+                  disabled={isProcessing}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-lg transition-all disabled:opacity-50 whitespace-nowrap"
+                >
+                  {isProcessing ? 'Mapeando...' : <> <FileSpreadsheet className="w-4 h-4" /> Importar Lista de Contatos </>}
+                </button>
+              </>
+            ) : (
+              <>
+                <span className={`text-xs font-bold px-3 py-2 rounded-xl ${theme === 'dark' ? 'text-slate-300' : 'text-slate-600'}`}>
+                  {selectedIds.size} selecionado(s)
+                </span>
+                <button
+                  type="button"
+                  onClick={toggleSelectionMode}
+                  className={`font-bold text-xs py-2.5 px-4 rounded-xl transition-all border ${
+                    theme === 'dark'
+                      ? 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={selectedIds.size === 0 || isDeleting}
+                  onClick={handleBulkDelete}
+                  className="flex items-center gap-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-lg transition-all whitespace-nowrap"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  {isDeleting ? 'Excluindo...' : `Excluir selecionados (${selectedIds.size})`}
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -254,58 +328,73 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
               </div>
 
               <div className="flex-1 space-y-3 overflow-y-auto max-h-[600px] pr-1">
-                {filteredLeads.map(lead => (
-                  <div
-                    key={lead.id}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, lead.id)}
-                    onDragEnd={handleDragEnd}
-                    onClick={() => onOpenLead(lead.id)}
-                    className={`group p-4 rounded-xl border transition-all cursor-pointer ${
-                      draggedLeadId === lead.id
-                        ? 'opacity-40 border-dashed border-indigo-500'
-                        : theme === 'dark'
-                          ? 'bg-slate-900 border-slate-800 hover:border-indigo-500/50 hover:shadow-lg hover:shadow-indigo-500/10'
-                          : 'bg-slate-50 border-slate-200 shadow-sm hover:border-indigo-500/50 hover:shadow-md'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                        <GripVertical className={`w-3.5 h-3.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity ${
-                          theme === 'dark' ? 'text-slate-600' : 'text-slate-400'
-                        }`} />
-                        <div className="font-bold text-sm truncate">{lead.nome}</div>
+                {filteredLeads.map(lead => {
+                  const isSelected = selectedIds.has(lead.id);
+                  return (
+                    <div
+                      key={lead.id}
+                      draggable={!selectionMode}
+                      onDragStart={(e) => handleDragStart(e, lead.id)}
+                      onDragEnd={handleDragEnd}
+                      onClick={() => (selectionMode ? toggleLeadSelected(lead.id) : onOpenLead(lead.id))}
+                      className={`group p-4 rounded-xl border transition-all cursor-pointer ${
+                        isSelected
+                          ? 'border-indigo-500 bg-indigo-500/10 ring-1 ring-indigo-500/40'
+                          : draggedLeadId === lead.id
+                            ? 'opacity-40 border-dashed border-indigo-500'
+                            : theme === 'dark'
+                              ? 'bg-slate-900 border-slate-800 hover:border-indigo-500/50 hover:shadow-lg hover:shadow-indigo-500/10'
+                              : 'bg-slate-50 border-slate-200 shadow-sm hover:border-indigo-500/50 hover:shadow-md'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                          {selectionMode ? (
+                            isSelected ? (
+                              <CheckSquare className="w-4 h-4 flex-shrink-0 text-indigo-500" />
+                            ) : (
+                              <Square className={`w-4 h-4 flex-shrink-0 ${theme === 'dark' ? 'text-slate-600' : 'text-slate-400'}`} />
+                            )
+                          ) : (
+                            <GripVertical className={`w-3.5 h-3.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity ${
+                              theme === 'dark' ? 'text-slate-600' : 'text-slate-400'
+                            }`} />
+                          )}
+                          <div className="font-bold text-sm truncate">{lead.nome}</div>
+                        </div>
+                        {!selectionMode && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (confirm(`Excluir o lead "${lead.nome}"?`)) {
+                                deleteLead(lead.id);
+                              }
+                            }}
+                            className={`p-1 rounded-md opacity-0 group-hover:opacity-100 transition-all flex-shrink-0 ${
+                              theme === 'dark'
+                                ? 'text-slate-600 hover:text-rose-400 hover:bg-rose-500/10'
+                                : 'text-slate-400 hover:text-rose-500 hover:bg-rose-500/10'
+                            }`}
+                            title="Excluir lead"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (confirm(`Excluir o lead "${lead.nome}"?`)) {
-                            deleteLead(lead.id);
-                          }
-                        }}
-                        className={`p-1 rounded-md opacity-0 group-hover:opacity-100 transition-all flex-shrink-0 ${
-                          theme === 'dark'
-                            ? 'text-slate-600 hover:text-rose-400 hover:bg-rose-500/10'
-                            : 'text-slate-400 hover:text-rose-500 hover:bg-rose-500/10'
-                        }`}
-                        title="Excluir lead"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="text-xs text-indigo-500 font-semibold mb-2 truncate pl-5">{lead.nomeEmpresa}</div>
+                      {lead.emailCorporativo && (
+                        <div className="text-[11px] text-slate-400 truncate mb-1 pl-5">✉️ {lead.emailCorporativo}</div>
+                      )}
+                      {lead.cargo && (
+                        <div className={`mt-2 pt-2 border-t text-[10px] line-clamp-2 leading-relaxed pl-5 ${
+                          theme === 'dark' ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-600'
+                        }`}>
+                          {lead.cargo}
+                        </div>
+                      )}
                     </div>
-                    <div className="text-xs text-indigo-500 font-semibold mb-2 truncate pl-5">{lead.nomeEmpresa}</div>
-                    {lead.emailCorporativo && (
-                      <div className="text-[11px] text-slate-400 truncate mb-1 pl-5">✉️ {lead.emailCorporativo}</div>
-                    )}
-                    {lead.cargo && (
-                      <div className={`mt-2 pt-2 border-t text-[10px] line-clamp-2 leading-relaxed pl-5 ${
-                        theme === 'dark' ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-600'
-                      }`}>
-                        {lead.cargo}
-                      </div>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
                 {filteredLeads.length === 0 && (
                   <div className="text-center text-xs text-slate-600 py-12 border-2 border-dashed border-slate-800/10 rounded-xl my-auto">
                     Nenhum lead nesta etapa
