@@ -7,12 +7,17 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { X } from 'lucide-react';
+import { X, Search, Loader2, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface LeadFormModalProps {
   leadId: string | null;
   onClose: () => void;
+}
+
+interface CnpjSocio {
+  nome: string;
+  cargo: string;
 }
 
 export function LeadFormModal({ leadId, onClose }: LeadFormModalProps) {
@@ -38,6 +43,11 @@ export function LeadFormModal({ leadId, onClose }: LeadFormModalProps) {
     motivoPerda: '',
   });
 
+  // 🆕 Busca pública de CNPJ (Receita Federal via BrasilAPI)
+  const [cnpjLoading, setCnpjLoading] = useState(false);
+  const [cnpjError, setCnpjError] = useState('');
+  const [cnpjSocios, setCnpjSocios] = useState<CnpjSocio[]>([]);
+
   useEffect(() => {
     if (editingLead) {
       setForm({
@@ -56,6 +66,43 @@ export function LeadFormModal({ leadId, onClose }: LeadFormModalProps) {
       });
     }
   }, [editingLead]);
+
+  const handleBuscarCnpj = async () => {
+    const cnpjLimpo = form.cnpj.replace(/[^0-9]/g, '');
+    setCnpjError('');
+    setCnpjSocios([]);
+
+    if (cnpjLimpo.length !== 14) {
+      setCnpjError('Digite um CNPJ válido (14 dígitos) antes de buscar.');
+      return;
+    }
+
+    setCnpjLoading(true);
+    try {
+      const res = await fetch(`/api/cnpj?cnpj=${cnpjLimpo}`);
+      const json = await res.json();
+
+      if (!res.ok || !json.ok) {
+        setCnpjError(json.error || 'CNPJ não encontrado.');
+        return;
+      }
+
+      const { razaoSocial, nomeFantasia, telefone, email, socios } = json.data;
+
+      setForm((prev) => ({
+        ...prev,
+        nomeEmpresa: prev.nomeEmpresa || nomeFantasia || razaoSocial || prev.nomeEmpresa,
+        telefoneFixo: prev.telefoneFixo || telefone || prev.telefoneFixo,
+        emailCorporativo: prev.emailCorporativo || email || prev.emailCorporativo,
+      }));
+
+      setCnpjSocios(socios || []);
+    } catch (err) {
+      setCnpjError('Erro ao consultar o CNPJ. Tente novamente.');
+    } finally {
+      setCnpjLoading(false);
+    }
+  };
 
   const handleSubmit = () => {
     if (!form.nome || !form.nomeEmpresa) return;
@@ -91,7 +138,6 @@ export function LeadFormModal({ leadId, onClose }: LeadFormModalProps) {
     { key: 'telefoneCelular', label: t.lead.cellPhone, type: 'tel' },
     { key: 'telefoneFixo', label: t.lead.landline, type: 'tel' },
     { key: 'nomeEmpresa', label: t.lead.company, required: true, type: 'text' },
-    { key: 'cnpj', label: t.lead.cnpj, type: 'text' },
     { key: 'valorProposta', label: t.lead.proposalValue, type: 'number' },
   ];
 
@@ -132,6 +178,60 @@ export function LeadFormModal({ leadId, onClose }: LeadFormModalProps) {
                   />
                 </div>
               ))}
+
+              {/* CNPJ + busca automática */}
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="cnpj" className="text-xs font-medium">{t.lead.cnpj}</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="cnpj"
+                    type="text"
+                    value={form.cnpj}
+                    onChange={(e) => setForm({ ...form, cnpj: e.target.value })}
+                    placeholder="00.000.000/0000-00"
+                    className="h-10 flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleBuscarCnpj}
+                    disabled={cnpjLoading}
+                    className="h-10 shrink-0"
+                  >
+                    {cnpjLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Search className="w-4 h-4" />
+                    )}
+                    <span className="ml-1.5 hidden sm:inline">Buscar dados</span>
+                  </Button>
+                </div>
+
+                {cnpjError && (
+                  <p className="text-xs text-destructive">{cnpjError}</p>
+                )}
+
+                {cnpjSocios.length > 0 && (
+                  <div className="mt-2 p-3 rounded-lg border border-border bg-secondary/40 space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                      <Users className="w-3.5 h-3.5" />
+                      Sócios/administradores encontrados na Receita Federal (referência — não preenchido automaticamente):
+                    </div>
+                    <ul className="space-y-1">
+                      {cnpjSocios.map((s, i) => (
+                        <li key={i} className="text-xs text-foreground">
+                          <span className="font-medium">{s.nome}</span>
+                          {s.cargo && <span className="text-muted-foreground"> — {s.cargo}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <p className="text-[11px] text-muted-foreground">
+                  Dados públicos da Receita Federal (razão social, telefone, e-mail e sócios). Empresa, telefone e e-mail só são preenchidos se estiverem vazios.
+                </p>
+              </div>
 
               {/* Temperature selector */}
               <div className="space-y-1.5">
