@@ -70,7 +70,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { error: insertError } = await adminClient.from('profiles').insert({
+    // upsert: se o trigger do banco já criou o perfil automaticamente (com valores
+    // padrão), sobrescreve com os dados corretos do convite, em vez de falhar
+    // com "duplicate key" e apagar o usuário que acabou de ser criado.
+    const { error: insertError } = await adminClient.from('profiles').upsert({
       id: newUser.user.id,
       email: cleanEmail,
       name: String(name).trim(),
@@ -78,7 +81,7 @@ export async function POST(req: NextRequest) {
       account_type: requesterProfile.account_type,
       scope_key: requesterProfile.scope_key,
       company_name: requesterProfile.company_name,
-    });
+    }, { onConflict: 'id' });
 
     if (insertError) {
       // Reverte a criação do usuário de autenticação se o perfil falhar
