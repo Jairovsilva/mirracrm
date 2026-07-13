@@ -23,9 +23,12 @@ export function SettingsView() {
   const [changingPassword, setChangingPassword] = useState(false);
   const [passwordMsg, setPasswordMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const handleLogout = () => {
-    logout();
-    window.location.href = '/';
+  // ── ALTERADO: agora é assíncrono e aguarda o logout terminar de verdade
+  // (incluindo a limpeza da sessão) antes de redirecionar, e usa "replace"
+  // para não deixar a página anterior em cache ──
+  const handleLogout = async () => {
+    await logout();
+    window.location.replace('/');
   };
 
   const handleChangePassword = async (e: React.FormEvent) => {
