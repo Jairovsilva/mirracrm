@@ -54,9 +54,12 @@ export default function AppPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const handleLogoutEvent = () => {
-      useCRMStore.getState().logout();
-      window.location.href = '/';
+    // ── ALTERADO: agora é assíncrono e aguarda o logout terminar de
+    // verdade (incluindo a limpeza do localStorage) antes de redirecionar,
+    // e usa "replace" para não deixar a página anterior em cache ──
+    const handleLogoutEvent = async () => {
+      await useCRMStore.getState().logout();
+      window.location.replace('/');
     };
 
     window.addEventListener('crm_logout_trigger', handleLogoutEvent);
