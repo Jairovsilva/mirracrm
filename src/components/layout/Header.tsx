@@ -42,8 +42,8 @@ export function Header({ onAddLead, onToggleAlerts, showAlerts }: HeaderProps) {
       {/* Mobile logo */}
       <div className="md:hidden flex items-center gap-2">
         <Image
-          src="/davinci_crie_uma_logomarca_para_o_meu_crm_que_ser__chamado.png"
-          alt="CorçaCRM"
+          src="/mirra-logo.png"
+          alt="MirraCRM"
           width={28}
           height={28}
           className="rounded-md"
