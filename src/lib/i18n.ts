@@ -2,7 +2,7 @@ export type Language = 'pt' | 'en' | 'es';
 
 export const translations = {
   pt: {
-    appName: 'CorçaCRM',
+    appName: 'MirraCRM',
     tagline: 'Inteligência comercial B2B',
     login: {
       title: 'Acesse sua conta',
@@ -112,7 +112,7 @@ export const translations = {
     },
   },
   en: {
-    appName: 'CorçaCRM',
+    appName: 'MirraCRM',
     tagline: 'B2B commercial intelligence',
     login: {
       title: 'Access your account',
@@ -222,7 +222,7 @@ export const translations = {
     },
   },
   es: {
-    appName: 'CorçaCRM',
+    appName: 'MirraCRM',
     tagline: 'Inteligencia comercial B2B',
     login: {
       title: 'Acceda a su cuenta',
