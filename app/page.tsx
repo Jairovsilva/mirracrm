@@ -79,14 +79,14 @@ export default function Home() {
       <header className="w-full max-w-7xl mx-auto px-6 h-20 flex items-center justify-between border-b border-neutral-100">
         <div className="flex items-center gap-3">
           <Image
-            src="/davinci_crie_uma_logomarca_para_o_meu_crm_que_ser__chamado.png"
-            alt="CorçaCRM"
+            src="/mirra-logo.png"
+            alt="MirraCRM"
             width={32}
             height={32}
             className="rounded-lg shadow-sm"
           />
           <span className="font-bold text-lg tracking-tight text-neutral-950">
-            Corça<span className="font-normal text-indigo-600">CRM</span>
+            Mirra<span className="font-normal text-indigo-600">CRM</span>
           </span>
         </div>
 
@@ -133,7 +133,7 @@ export default function Home() {
 
           <div className="text-left space-y-2 mb-6">
             <h3 className="text-xl font-bold text-neutral-950 tracking-tight">
-              {isLogin ? 'Corça CRM Workspace' : 'Cadastre sua Empresa'}
+              {isLogin ? 'Mirra CRM Workspace' : 'Cadastre sua Empresa'}
             </h3>
             <p className="text-xs text-neutral-400">
               {isLogin ? 'Insira suas credenciais de acesso' : 'Crie sua conta e comece agora mesmo'}
@@ -218,7 +218,7 @@ export default function Home() {
 
       {/* FOOTER */}
       <footer className="text-center py-6 border-t border-neutral-100 text-xs text-neutral-400">
-        © 2026 CorçaCRM Technologies Inc. — Enterprise Standard & LGPD Enforced
+        © 2026 MirraCRM Technologies Inc. — Enterprise Standard & LGPD Enforced
       </footer>
     </div>
   );
