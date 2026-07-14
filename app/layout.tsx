@@ -1,14 +1,11 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
-
 const inter = Inter({ subsets: ['latin'] });
-
 export const metadata: Metadata = {
-  title: 'CorçaCRM — Inteligência Comercial B2B',
+  title: 'MirraCRM — Inteligência Comercial B2B',
   description: 'CRM B2B completo para gestão de leads, funil de vendas e inteligência comercial.',
 };
-
 export default function RootLayout({
   children,
 }: {
