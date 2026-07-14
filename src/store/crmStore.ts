@@ -430,10 +430,14 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       if (currentUser) {
         saveUIPrefs(currentUser.email, { theme, language, sidebarOpen });
       }
-      // Aguarda o Supabase terminar de encerrar a sessão antes de limpar o
-      // estado local — sem isso, um redirecionamento imediato pode encontrar
-      // a sessão antiga ainda válida e voltar para dentro do CRM.
-      await supabase.auth.signOut();
+      // Tenta encerrar a sessão no Supabase, mas NÃO deixa uma falha aqui
+      // travar o logout — mesmo que o servidor não responda, o usuário
+      // precisa conseguir sair localmente e ser redirecionado.
+      try {
+        await supabase.auth.signOut();
+      } catch (err) {
+        console.error('Erro ao encerrar sessão no Supabase (logout local prosseguirá mesmo assim):', err);
+      }
       set({
         currentUser: null,
         accessToken: null,
