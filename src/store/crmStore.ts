@@ -260,7 +260,7 @@ interface CRMState {
   // ── Auth ────────────────────────────────────────────────────────────────
   register: (email: string, password: string, name: string) => Promise<{ ok: boolean; error?: string }>;
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
-  logout: () => void;
+  logout: () => Promise<void>;
   changePassword: (newPassword: string) => Promise<{ ok: boolean; error?: string }>;
 
   // ── Leads ───────────────────────────────────────────────────────────────
@@ -425,12 +425,15 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       return { ok: true };
     },
 
-    logout: () => {
+    logout: async () => {
       const { currentUser, theme, language, sidebarOpen } = get();
       if (currentUser) {
         saveUIPrefs(currentUser.email, { theme, language, sidebarOpen });
       }
-      supabase.auth.signOut();
+      // Aguarda o Supabase terminar de encerrar a sessão antes de limpar o
+      // estado local — sem isso, um redirecionamento imediato pode encontrar
+      // a sessão antiga ainda válida e voltar para dentro do CRM.
+      await supabase.auth.signOut();
       set({
         currentUser: null,
         accessToken: null,
