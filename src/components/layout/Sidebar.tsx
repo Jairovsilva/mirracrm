@@ -27,8 +27,8 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
     { id: 'team' as ViewType, label: t.nav.team, icon: UserCog },
     { id: 'settings' as ViewType, label: t.nav.settings, icon: Settings },
   ];
-  const handleLogout = async () => {
-    await logout();
+  const handleLogout = () => {
+    logout();
     window.location.href = '/';
   };
   return (
@@ -36,8 +36,8 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
       {/* Logo */}
       <div className="h-16 flex items-center gap-3 px-6 border-b border-sidebar-border">
         <Image
-          src="/davinci_crie_uma_logomarca_para_o_meu_crm_que_ser__chamado.png"
-          alt="CorçaCRM"
+          src="/mirra-logo.png"
+          alt="MirraCRM"
           width={36}
           height={36}
           className="rounded-lg"
