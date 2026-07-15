@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useTranslation } from '@/src/lib/useTranslation';
 import { useCRMStore } from '@/src/store/crmStore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,11 +8,17 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Legend, AreaChart, Area, RadialBarChart, RadialBar,
 } from 'recharts';
-import { TrendingUp, Users, Target, DollarSign, Activity as ActivityIcon } from 'lucide-react';
+import { TrendingUp, Users, Target, DollarSign, Activity as ActivityIcon, FileDown } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 export function AnalyticsView() {
   const { t } = useTranslation();
   const leads = useCRMStore((s) => s.leads);
+  const currentUser = useCRMStore((s) => s.currentUser);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+
+  const isOwner = currentUser?.role === 'owner';
 
   const stageData = [
     { name: t.stages.entrada, value: leads.filter((l) => l.stage === 'entrada').length, color: 'hsl(var(--chart-1))' },
@@ -52,11 +59,142 @@ export function AnalyticsView() {
     { label: 'Atividades', value: leads.reduce((sum, l) => sum + (l.activities?.length || 0), 0), icon: ActivityIcon, color: 'text-chart-4', bg: 'bg-chart-4/10' },
   ];
 
+  // 🆕 Exportar relatório detalhado em PDF (apenas owner)
+  const handleExportPdf = () => {
+    if (!isOwner) return;
+    setIsExportingPdf(true);
+
+    try {
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+      const empresa = currentUser?.companyName || 'Workspace';
+      const geradoEm = new Date().toLocaleString('pt-BR');
+      const pageWidth = doc.internal.pageSize.getWidth();
+
+      // Cabeçalho
+      doc.setFontSize(18);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Relatório Comercial', 40, 50);
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100);
+      doc.text(`Empresa: ${empresa}`, 40, 68);
+      doc.text(`Gerado em: ${geradoEm}`, 40, 82);
+      doc.setTextColor(0);
+
+      // KPIs principais
+      autoTable(doc, {
+        startY: 100,
+        head: [['Indicador', 'Valor']],
+        body: [
+          [t.dashboard.totalLeads, String(leads.length)],
+          [t.dashboard.pipelineValue, `R$ ${totalValue.toLocaleString('pt-BR')}`],
+          ['Taxa de Conversão', `${conversionRate}%`],
+          ['Total de Atividades', String(leads.reduce((sum, l) => sum + (l.activities?.length || 0), 0))],
+        ],
+        theme: 'grid',
+        headStyles: { fillColor: [79, 70, 229] },
+        styles: { fontSize: 9 },
+      });
+
+      // Distribuição por etapa
+      const afterKpis = (doc as any).lastAutoTable.finalY + 20;
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Distribuição por Etapa', 40, afterKpis);
+
+      autoTable(doc, {
+        startY: afterKpis + 10,
+        head: [['Etapa', 'Quantidade', 'Valor em Pipeline']],
+        body: stageData.map((s, i) => [
+          s.name,
+          String(s.value),
+          `R$ ${pipelineByStage[i].valor.toLocaleString('pt-BR')}`,
+        ]),
+        theme: 'grid',
+        headStyles: { fillColor: [79, 70, 229] },
+        styles: { fontSize: 9 },
+      });
+
+      // Distribuição por temperatura
+      const afterStages = (doc as any).lastAutoTable.finalY + 20;
+      doc.setFontSize(12);
+      doc.text('Distribuição por Temperatura', 40, afterStages);
+
+      autoTable(doc, {
+        startY: afterStages + 10,
+        head: [['Temperatura', 'Quantidade']],
+        body: tempData.map((tItem) => [tItem.name, String(tItem.value)]),
+        theme: 'grid',
+        headStyles: { fillColor: [79, 70, 229] },
+        styles: { fontSize: 9 },
+      });
+
+      // Lista detalhada de leads
+      const afterTemp = (doc as any).lastAutoTable.finalY + 20;
+      doc.setFontSize(12);
+      doc.text('Detalhamento de Leads', 40, afterTemp);
+
+      autoTable(doc, {
+        startY: afterTemp + 10,
+        head: [['Nome', 'Empresa', 'Cargo', 'Telefone', 'E-mail', 'Etapa', 'Temp.', 'Valor']],
+        body: leads.map((l) => [
+          l.nome,
+          l.nomeEmpresa,
+          l.cargo || '-',
+          l.telefoneCelular || l.telefoneFixo || '-',
+          l.emailCorporativo || '-',
+          t.stages[l.stage],
+          t.temperature[l.temperatura],
+          `R$ ${(l.valorProposta || 0).toLocaleString('pt-BR')}`,
+        ]),
+        theme: 'striped',
+        headStyles: { fillColor: [79, 70, 229] },
+        styles: { fontSize: 7, cellPadding: 4 },
+        columnStyles: { 0: { cellWidth: 70 }, 1: { cellWidth: 70 } },
+      });
+
+      // Rodapé com numeração de página
+      const totalPages = doc.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(150);
+        doc.text(
+          `${empresa} — Relatório Comercial — Página ${i} de ${totalPages}`,
+          pageWidth / 2,
+          doc.internal.pageSize.getHeight() - 20,
+          { align: 'center' }
+        );
+      }
+
+      const dataArquivo = new Date().toISOString().slice(0, 10);
+      doc.save(`relatorio_comercial_${dataArquivo}.pdf`);
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-[1600px] mx-auto animate-fade-in">
-      <div>
-        <h1 className="text-2xl font-bold">{t.nav.analytics}</h1>
-        <p className="text-sm text-muted-foreground mt-1">Análise de performance comercial</p>
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">{t.nav.analytics}</h1>
+          <p className="text-sm text-muted-foreground mt-1">Análise de performance comercial</p>
+        </div>
+
+        {/* 🆕 Exportar PDF — apenas owner */}
+        {isOwner && (
+          <button
+            type="button"
+            onClick={handleExportPdf}
+            disabled={isExportingPdf}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-lg transition-all whitespace-nowrap"
+          >
+            <FileDown className="w-4 h-4" />
+            {isExportingPdf ? 'Gerando PDF...' : 'Baixar Relatório em PDF'}
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
