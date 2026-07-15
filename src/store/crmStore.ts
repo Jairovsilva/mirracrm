@@ -174,9 +174,15 @@ function isMeetingScheduled(content: string): boolean {
 // Não é um dado novo salvo no banco — é calculado a partir das atividades que
 // já existem, olhando a atividade mais recente do lead.
 
-export type LeadCardStatus = 'reuniao_marcada' | 'retornar_ligacao' | 'normal';
+export type LeadCardStatus = 'perdido_pos_reuniao' | 'reuniao_marcada' | 'retornar_ligacao' | 'normal';
 
 export function getLeadCardStatus(lead: Lead): LeadCardStatus {
+  // Prioridade máxima: lead que chegou a ter reunião e foi marcado como perdido
+  // (usa o campo motivoPerda que já existe no formulário — nenhum campo novo).
+  if (lead.motivoPerda && lead.motivoPerda.trim() !== '' && lead.stage === 'reuniao') {
+    return 'perdido_pos_reuniao';
+  }
+
   if (!lead.activities || lead.activities.length === 0) return 'normal';
   const last = lead.activities[lead.activities.length - 1];
   if (last.type === 'reuniao' || isMeetingScheduled(last.content)) return 'reuniao_marcada';
@@ -637,9 +643,20 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       const { currentUser, leads } = get();
       if (!currentUser) return;
 
-      const { error } = await supabase.from('leads').delete().eq('id', id);
+      // .select() após o delete devolve as linhas que realmente foram excluídas.
+      // Se vier vazio, a exclusão foi bloqueada (ex.: permissão) e não devemos
+      // remover o card da tela — senão ele "volta" no próximo carregamento.
+      const { data, error } = await supabase.from('leads').delete().eq('id', id).select();
+
       if (error) {
         console.error('Erro ao excluir lead:', error);
+        alert('Não foi possível excluir este lead. Você pode não ter permissão para isso.');
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        console.warn('Exclusão bloqueada por permissão: nenhum lead foi removido no banco.', id);
+        alert('Não foi possível excluir este lead (sem permissão). Fale com o administrador da conta.');
         return;
       }
 
@@ -650,14 +667,27 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       const { currentUser, leads } = get();
       if (!currentUser || ids.length === 0) return;
 
-      const { error } = await supabase.from('leads').delete().in('id', ids);
+      const { data, error } = await supabase.from('leads').delete().in('id', ids).select();
+
       if (error) {
         console.error('Erro ao excluir leads em lote:', error);
+        alert('Não foi possível excluir os leads selecionados.');
         return;
       }
 
-      const idsSet = new Set(ids);
-      set({ leads: leads.filter((l) => !idsSet.has(l.id)) });
+      const deletedIds = new Set((data ?? []).map((row: any) => row.id));
+
+      if (deletedIds.size === 0) {
+        console.warn('Exclusão em lote bloqueada por permissão: nenhum lead foi removido no banco.');
+        alert('Não foi possível excluir os leads selecionados (sem permissão).');
+        return;
+      }
+
+      if (deletedIds.size < ids.length) {
+        console.warn(`Apenas ${deletedIds.size} de ${ids.length} leads foram excluídos (permissão parcial).`);
+      }
+
+      set({ leads: leads.filter((l) => !deletedIds.has(l.id)) });
     },
 
     addActivity: async (leadId, type, content) => {
@@ -896,6 +926,22 @@ export function runDailyAlertAutomation(): void {
   storageSet(`corca_v3::automation::${currentUser.id}`, todayStr);
 
   const myLeads = leads;
+
+  // 🔄 Leads perdidos após reunião há 4+ meses → sugerir retomar contato
+  const FOUR_MONTHS_MS = 4 * 30 * 24 * 60 * 60 * 1000;
+  const lostAfterMeetingToRevisit = myLeads.filter((l) => {
+    if (!(l.motivoPerda && l.motivoPerda.trim() !== '' && l.stage === 'reuniao')) return false;
+    const lostSince = new Date(l.updatedAt).getTime();
+    return Date.now() - lostSince >= FOUR_MONTHS_MS;
+  });
+
+  if (lostAfterMeetingToRevisit.length > 0) {
+    addAlert({
+      type: 'info',
+      title: `🔄 ${lostAfterMeetingToRevisit.length} lead(s) perdido(s) há 4+ meses`,
+      message: `Pode ser hora de retomar contato: ${lostAfterMeetingToRevisit.slice(0, 3).map((l) => l.nome).join(', ')}${lostAfterMeetingToRevisit.length > 3 ? ` e mais ${lostAfterMeetingToRevisit.length - 3}` : ''}. Talvez haja uma nova oportunidade.`,
+    });
+  }
 
   const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
   const staleLeads = myLeads.filter((l) => {
