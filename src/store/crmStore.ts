@@ -156,40 +156,6 @@ function isFailedContactAttempt(content: string): boolean {
   return FAILED_CONTACT_KEYWORDS.some((kw) => normalized.includes(kw));
 }
 
-// ─── Detecção de reunião marcada ────────────────────────────────────────────────
-
-const MEETING_SCHEDULED_KEYWORDS = [
-  'reuniao marcada', 'reuniao agendada', 'agendei reuniao', 'agendada reuniao',
-  'reuniao confirmada', 'marcamos reuniao', 'reuniao remarcada', 'call marcada',
-  'call agendada', 'agendado reuniao', 'marcou reuniao', 'reuniao para',
-  'confirmou reuniao', 'reuniao confirmou',
-];
-
-function isMeetingScheduled(content: string): boolean {
-  const normalized = normalizeText(content);
-  return MEETING_SCHEDULED_KEYWORDS.some((kw) => normalized.includes(kw));
-}
-
-// ─── Status visual do card (usado pelo Kanban para colorir o card) ─────────────
-// Não é um dado novo salvo no banco — é calculado a partir das atividades que
-// já existem, olhando a atividade mais recente do lead.
-
-export type LeadCardStatus = 'perdido_pos_reuniao' | 'reuniao_marcada' | 'retornar_ligacao' | 'normal';
-
-export function getLeadCardStatus(lead: Lead): LeadCardStatus {
-  // Prioridade máxima: lead que chegou a ter reunião e foi marcado como perdido
-  // (usa o campo motivoPerda que já existe no formulário — nenhum campo novo).
-  if (lead.motivoPerda && lead.motivoPerda.trim() !== '' && lead.stage === 'reuniao') {
-    return 'perdido_pos_reuniao';
-  }
-
-  if (!lead.activities || lead.activities.length === 0) return 'normal';
-  const last = lead.activities[lead.activities.length - 1];
-  if (last.type === 'reuniao' || isMeetingScheduled(last.content)) return 'reuniao_marcada';
-  if (isFailedContactAttempt(last.content)) return 'retornar_ligacao';
-  return 'normal';
-}
-
 // ─── Mappers (linhas do banco em snake_case → objetos camelCase da store) ──────
 
 function mapProfileRow(row: any): UserProfile {
@@ -294,7 +260,7 @@ interface CRMState {
   // ── Auth ────────────────────────────────────────────────────────────────
   register: (email: string, password: string, name: string) => Promise<{ ok: boolean; error?: string }>;
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
-  logout: () => Promise<void>;
+  logout: () => void;
   changePassword: (newPassword: string) => Promise<{ ok: boolean; error?: string }>;
 
   // ── Leads ───────────────────────────────────────────────────────────────
@@ -459,19 +425,12 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       return { ok: true };
     },
 
-    logout: async () => {
+    logout: () => {
       const { currentUser, theme, language, sidebarOpen } = get();
       if (currentUser) {
         saveUIPrefs(currentUser.email, { theme, language, sidebarOpen });
       }
-      // Tenta encerrar a sessão no Supabase, mas NÃO deixa uma falha aqui
-      // travar o logout — mesmo que o servidor não responda, o usuário
-      // precisa conseguir sair localmente e ser redirecionado.
-      try {
-        await supabase.auth.signOut();
-      } catch (err) {
-        console.error('Erro ao encerrar sessão no Supabase (logout local prosseguirá mesmo assim):', err);
-      }
+      supabase.auth.signOut();
       set({
         currentUser: null,
         accessToken: null,
@@ -643,20 +602,9 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       const { currentUser, leads } = get();
       if (!currentUser) return;
 
-      // .select() após o delete devolve as linhas que realmente foram excluídas.
-      // Se vier vazio, a exclusão foi bloqueada (ex.: permissão) e não devemos
-      // remover o card da tela — senão ele "volta" no próximo carregamento.
-      const { data, error } = await supabase.from('leads').delete().eq('id', id).select();
-
+      const { error } = await supabase.from('leads').delete().eq('id', id);
       if (error) {
         console.error('Erro ao excluir lead:', error);
-        alert('Não foi possível excluir este lead. Você pode não ter permissão para isso.');
-        return;
-      }
-
-      if (!data || data.length === 0) {
-        console.warn('Exclusão bloqueada por permissão: nenhum lead foi removido no banco.', id);
-        alert('Não foi possível excluir este lead (sem permissão). Fale com o administrador da conta.');
         return;
       }
 
@@ -667,27 +615,14 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       const { currentUser, leads } = get();
       if (!currentUser || ids.length === 0) return;
 
-      const { data, error } = await supabase.from('leads').delete().in('id', ids).select();
-
+      const { error } = await supabase.from('leads').delete().in('id', ids);
       if (error) {
         console.error('Erro ao excluir leads em lote:', error);
-        alert('Não foi possível excluir os leads selecionados.');
         return;
       }
 
-      const deletedIds = new Set((data ?? []).map((row: any) => row.id));
-
-      if (deletedIds.size === 0) {
-        console.warn('Exclusão em lote bloqueada por permissão: nenhum lead foi removido no banco.');
-        alert('Não foi possível excluir os leads selecionados (sem permissão).');
-        return;
-      }
-
-      if (deletedIds.size < ids.length) {
-        console.warn(`Apenas ${deletedIds.size} de ${ids.length} leads foram excluídos (permissão parcial).`);
-      }
-
-      set({ leads: leads.filter((l) => !deletedIds.has(l.id)) });
+      const idsSet = new Set(ids);
+      set({ leads: leads.filter((l) => !idsSet.has(l.id)) });
     },
 
     addActivity: async (leadId, type, content) => {
@@ -724,20 +659,6 @@ export const useCRMStore = create<CRMState>()((set, get) => {
           type: 'warning',
           title: '📞 Retornar ligação',
           message: `A tentativa de contato com ${lead?.nome ?? 'este lead'}${lead?.nomeEmpresa ? ` (${lead.nomeEmpresa})` : ''} não teve sucesso. Lembre-se de retornar a ligação.`,
-          leadId,
-        });
-      }
-
-      // 📅 Automação: reunião marcada → move o card para a etapa "Reunião" + alerta
-      if (type === 'reuniao' || isMeetingScheduled(content)) {
-        const leadAtual = next.find((l) => l.id === leadId);
-        if (leadAtual && leadAtual.stage !== 'reuniao') {
-          await get().moveLead(leadId, 'reuniao');
-        }
-        await get().addAlert({
-          type: 'success',
-          title: '📅 Reunião agendada',
-          message: `Reunião marcada com ${leadAtual?.nome ?? 'este lead'}${leadAtual?.nomeEmpresa ? ` (${leadAtual.nomeEmpresa})` : ''}. O card foi movido para a etapa Reunião.`,
           leadId,
         });
       }
@@ -926,22 +847,6 @@ export function runDailyAlertAutomation(): void {
   storageSet(`corca_v3::automation::${currentUser.id}`, todayStr);
 
   const myLeads = leads;
-
-  // 🔄 Leads perdidos após reunião há 4+ meses → sugerir retomar contato
-  const FOUR_MONTHS_MS = 4 * 30 * 24 * 60 * 60 * 1000;
-  const lostAfterMeetingToRevisit = myLeads.filter((l) => {
-    if (!(l.motivoPerda && l.motivoPerda.trim() !== '' && l.stage === 'reuniao')) return false;
-    const lostSince = new Date(l.updatedAt).getTime();
-    return Date.now() - lostSince >= FOUR_MONTHS_MS;
-  });
-
-  if (lostAfterMeetingToRevisit.length > 0) {
-    addAlert({
-      type: 'info',
-      title: `🔄 ${lostAfterMeetingToRevisit.length} lead(s) perdido(s) há 4+ meses`,
-      message: `Pode ser hora de retomar contato: ${lostAfterMeetingToRevisit.slice(0, 3).map((l) => l.nome).join(', ')}${lostAfterMeetingToRevisit.length > 3 ? ` e mais ${lostAfterMeetingToRevisit.length - 3}` : ''}. Talvez haja uma nova oportunidade.`,
-    });
-  }
 
   const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
   const staleLeads = myLeads.filter((l) => {

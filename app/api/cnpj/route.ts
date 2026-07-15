@@ -13,34 +13,12 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`, {
-      headers: {
-        // Alguns provedores bloqueiam requisições sem User-Agent/Accept —
-        // isso fazia toda consulta cair no "CNPJ não encontrado" por engano.
-        'User-Agent': 'MirraCRM/1.0 (contato via app)',
-        Accept: 'application/json',
-      },
-      cache: 'no-store',
-    });
+    const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`);
 
-    // Só trata como "não encontrado" quando a Receita Federal de fato
-    // não tem esse CNPJ (status 404 real da BrasilAPI).
-    if (res.status === 404) {
+    if (!res.ok) {
       return NextResponse.json(
         { ok: false, error: 'CNPJ não encontrado na base pública da Receita Federal.' },
         { status: 404 }
-      );
-    }
-
-    // Qualquer outro erro (bloqueio, limite de requisições, instabilidade)
-    // agora aparece com uma mensagem diferente, para não confundir com
-    // "CNPJ inexistente".
-    if (!res.ok) {
-      const bodyText = await res.text().catch(() => '');
-      console.error(`BrasilAPI retornou status ${res.status} para CNPJ ${cnpj}:`, bodyText);
-      return NextResponse.json(
-        { ok: false, error: `Serviço de CNPJ indisponível no momento (código ${res.status}). Tente novamente em instantes.` },
-        { status: 502 }
       );
     }
 
@@ -69,7 +47,6 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (err: any) {
-    console.error('Erro de rede/parse ao consultar CNPJ:', err);
     return NextResponse.json(
       { ok: false, error: 'Erro ao consultar a base pública de CNPJ. Tente novamente.' },
       { status: 500 }

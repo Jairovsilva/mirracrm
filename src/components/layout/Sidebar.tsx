@@ -27,9 +27,9 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
     { id: 'team' as ViewType, label: t.nav.team, icon: UserCog },
     { id: 'settings' as ViewType, label: t.nav.settings, icon: Settings },
   ];
-  const handleLogout = async () => {
-    await logout();
-    window.location.replace('/');
+  const handleLogout = () => {
+    logout();
+    window.location.href = '/';
   };
   return (
     <aside className="hidden md:flex w-64 flex-col bg-sidebar border-r border-sidebar-border shrink-0">
