@@ -156,41 +156,6 @@ function isFailedContactAttempt(content: string): boolean {
   return FAILED_CONTACT_KEYWORDS.some((kw) => normalized.includes(kw));
 }
 
-// ─── Detecção de reunião marcada ────────────────────────────────────────────────
-
-const MEETING_SCHEDULED_KEYWORDS = [
-  'reuniao marcada', 'reuniao agendada', 'agendei reuniao', 'agendada reuniao',
-  'reuniao confirmada', 'marcamos reuniao', 'reuniao remarcada', 'call marcada',
-  'call agendada', 'agendado reuniao', 'marcou reuniao', 'reuniao para',
-  'confirmou reuniao', 'reuniao confirmou',
-];
-
-function isMeetingScheduled(content: string): boolean {
-  const normalized = normalizeText(content);
-  return MEETING_SCHEDULED_KEYWORDS.some((kw) => normalized.includes(kw));
-}
-
-// ─── Status visual do card (usado pelo Kanban para colorir o card) ─────────────
-// Não é um dado novo salvo no banco — é calculado a partir das atividades que
-// já existem, olhando a atividade mais recente do lead.
-
-export type LeadCardStatus = 'perdido_pos_reuniao' | 'reuniao_marcada' | 'retornar_ligacao' | 'normal';
-
-export function getLeadCardStatus(lead: Lead): LeadCardStatus {
-  // Prioridade máxima: lead perdido (motivoPerda preenchido). Como a
-  // automação move o lead para "Fim de Cadência" assim que a reunião é
-  // perdida, não dependemos mais da etapa atual para manter o card vermelho.
-  if (lead.motivoPerda && lead.motivoPerda.trim() !== '') {
-    return 'perdido_pos_reuniao';
-  }
-
-  if (!lead.activities || lead.activities.length === 0) return 'normal';
-  const last = lead.activities[lead.activities.length - 1];
-  if (last.type === 'reuniao' || isMeetingScheduled(last.content)) return 'reuniao_marcada';
-  if (isFailedContactAttempt(last.content)) return 'retornar_ligacao';
-  return 'normal';
-}
-
 // ─── Mappers (linhas do banco em snake_case → objetos camelCase da store) ──────
 
 function mapProfileRow(row: any): UserProfile {
@@ -295,7 +260,7 @@ interface CRMState {
   // ── Auth ────────────────────────────────────────────────────────────────
   register: (email: string, password: string, name: string) => Promise<{ ok: boolean; error?: string }>;
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
-  logout: () => Promise<void>;
+  logout: () => void;
   changePassword: (newPassword: string) => Promise<{ ok: boolean; error?: string }>;
 
   // ── Leads ───────────────────────────────────────────────────────────────
@@ -367,7 +332,7 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       if (signUpError || !signUpData.user) {
         const msg = signUpError?.message?.toLowerCase() ?? '';
         if (msg.includes('already registered') || msg.includes('already exists')) {
-          return { ok: false, error: 'Este email já está cadastrado. Faça login.' };
+          return { ok: false, error: 'Este email já está cadastrado.' };
         }
         return { ok: false, error: signUpError?.message || 'Erro ao cadastrar.' };
       }
@@ -375,21 +340,15 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       const { data: countInScope } = await supabase.rpc('count_profiles_in_scope', { p_scope_key: scopeKey });
       const role: UserRole = (countInScope ?? 0) === 0 ? 'owner' : 'vendedor';
 
-      // upsert em vez de insert: se já existir uma linha para este id (por
-      // exemplo, criada por um gatilho automático do banco), ATUALIZAMOS
-      // com os dados corretos em vez de travar tentando criar duplicata.
-      const { error: profileError } = await supabase.from('profiles').upsert(
-        {
-          id: signUpData.user.id,
-          email: clean,
-          name: name.trim(),
-          role,
-          account_type: accountType,
-          scope_key: scopeKey,
-          company_name: companyName,
-        },
-        { onConflict: 'id' }
-      );
+      const { error: profileError } = await supabase.from('profiles').insert({
+        id: signUpData.user.id,
+        email: clean,
+        name: name.trim(),
+        role,
+        account_type: accountType,
+        scope_key: scopeKey,
+        company_name: companyName,
+      });
 
       if (profileError) {
         return { ok: false, error: profileError.message };
@@ -466,35 +425,12 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       return { ok: true };
     },
 
-    logout: async () => {
+    logout: () => {
       const { currentUser, theme, language, sidebarOpen } = get();
       if (currentUser) {
         saveUIPrefs(currentUser.email, { theme, language, sidebarOpen });
       }
-
-      // scope: 'local' limpa a sessão salva neste navegador sem depender de
-      // uma chamada de rede bem-sucedida ao servidor — evita que uma falha
-      // de rede deixe o token antigo "preso" no localStorage.
-      try {
-        await supabase.auth.signOut({ scope: 'local' });
-      } catch (err) {
-        console.error('Erro ao encerrar sessão no Supabase (logout local prosseguirá mesmo assim):', err);
-      }
-
-      // Limpeza manual de segurança: garante que nenhum resquício de sessão
-      // fique salvo, mesmo que o signOut() acima falhe silenciosamente por
-      // qualquer motivo (garante que a tela de login não "puxe" a sessão
-      // antiga de volta).
-      if (typeof window !== 'undefined') {
-        try {
-          Object.keys(localStorage)
-            .filter((key) => key.startsWith('sb-') && key.includes('-auth-token'))
-            .forEach((key) => localStorage.removeItem(key));
-        } catch (err) {
-          console.error('Erro na limpeza manual de sessão:', err);
-        }
-      }
-
+      supabase.auth.signOut();
       set({
         currentUser: null,
         accessToken: null,
@@ -605,33 +541,20 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       const { currentUser, leads } = get();
       if (!currentUser) return;
 
-      const leadAtual = leads.find((l) => l.id === id);
-
-      // 📉 Automação: reunião perdida → move automaticamente para "Fim de Cadência"
-      // Só dispara quando o motivo de perda está sendo preenchido agora E o
-      // lead ainda está na etapa "Reunião".
-      const perdaSendoPreenchida = data.motivoPerda !== undefined && data.motivoPerda.trim() !== '';
-      const deveMoverParaFimDeCadencia =
-        perdaSendoPreenchida && leadAtual?.stage === 'reuniao' && data.stage === undefined;
-
-      const finalData = deveMoverParaFimDeCadencia
-        ? { ...data, stage: 'fim_cadencia' as Stage }
-        : data;
-
       const payload: Record<string, any> = { updated_at: new Date().toISOString() };
-      if (finalData.nome !== undefined) payload.nome = finalData.nome;
-      if (finalData.cargo !== undefined) payload.cargo = finalData.cargo;
-      if (finalData.emailCorporativo !== undefined) payload.email_corporativo = finalData.emailCorporativo;
-      if (finalData.telefoneCelular !== undefined) payload.telefone_celular = finalData.telefoneCelular;
-      if (finalData.telefoneFixo !== undefined) payload.telefone_fixo = finalData.telefoneFixo;
-      if (finalData.nomeEmpresa !== undefined) payload.nome_empresa = finalData.nomeEmpresa;
-      if (finalData.cnpj !== undefined) payload.cnpj = finalData.cnpj;
-      if (finalData.linkedin !== undefined) payload.linkedin = finalData.linkedin;
-      if (finalData.stage !== undefined) payload.stage = finalData.stage;
-      if (finalData.temperatura !== undefined) payload.temperatura = finalData.temperatura;
-      if (finalData.valorProposta !== undefined) payload.valor_proposta = finalData.valorProposta;
-      if (finalData.motivoPerda !== undefined) payload.motivo_perda = finalData.motivoPerda;
-      if (finalData.motivoSemReuniao !== undefined) payload.motivo_sem_reuniao = finalData.motivoSemReuniao;
+      if (data.nome !== undefined) payload.nome = data.nome;
+      if (data.cargo !== undefined) payload.cargo = data.cargo;
+      if (data.emailCorporativo !== undefined) payload.email_corporativo = data.emailCorporativo;
+      if (data.telefoneCelular !== undefined) payload.telefone_celular = data.telefoneCelular;
+      if (data.telefoneFixo !== undefined) payload.telefone_fixo = data.telefoneFixo;
+      if (data.nomeEmpresa !== undefined) payload.nome_empresa = data.nomeEmpresa;
+      if (data.cnpj !== undefined) payload.cnpj = data.cnpj;
+      if (data.linkedin !== undefined) payload.linkedin = data.linkedin;
+      if (data.stage !== undefined) payload.stage = data.stage;
+      if (data.temperatura !== undefined) payload.temperatura = data.temperatura;
+      if (data.valorProposta !== undefined) payload.valor_proposta = data.valorProposta;
+      if (data.motivoPerda !== undefined) payload.motivo_perda = data.motivoPerda;
+      if (data.motivoSemReuniao !== undefined) payload.motivo_sem_reuniao = data.motivoSemReuniao;
 
       const { error } = await supabase.from('leads').update(payload).eq('id', id);
       if (error) {
@@ -639,7 +562,7 @@ export const useCRMStore = create<CRMState>()((set, get) => {
         return;
       }
 
-      const next = leads.map((l) => (l.id === id ? { ...l, ...finalData, updatedAt: new Date().toISOString() } : l));
+      const next = leads.map((l) => (l.id === id ? { ...l, ...data, updatedAt: new Date().toISOString() } : l));
       set({ leads: next });
     },
 
@@ -679,20 +602,9 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       const { currentUser, leads } = get();
       if (!currentUser) return;
 
-      // .select() após o delete devolve as linhas que realmente foram excluídas.
-      // Se vier vazio, a exclusão foi bloqueada (ex.: permissão) e não devemos
-      // remover o card da tela — senão ele "volta" no próximo carregamento.
-      const { data, error } = await supabase.from('leads').delete().eq('id', id).select();
-
+      const { error } = await supabase.from('leads').delete().eq('id', id);
       if (error) {
         console.error('Erro ao excluir lead:', error);
-        alert('Não foi possível excluir este lead. Você pode não ter permissão para isso.');
-        return;
-      }
-
-      if (!data || data.length === 0) {
-        console.warn('Exclusão bloqueada por permissão: nenhum lead foi removido no banco.', id);
-        alert('Não foi possível excluir este lead (sem permissão). Fale com o administrador da conta.');
         return;
       }
 
@@ -703,27 +615,14 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       const { currentUser, leads } = get();
       if (!currentUser || ids.length === 0) return;
 
-      const { data, error } = await supabase.from('leads').delete().in('id', ids).select();
-
+      const { error } = await supabase.from('leads').delete().in('id', ids);
       if (error) {
         console.error('Erro ao excluir leads em lote:', error);
-        alert('Não foi possível excluir os leads selecionados.');
         return;
       }
 
-      const deletedIds = new Set((data ?? []).map((row: any) => row.id));
-
-      if (deletedIds.size === 0) {
-        console.warn('Exclusão em lote bloqueada por permissão: nenhum lead foi removido no banco.');
-        alert('Não foi possível excluir os leads selecionados (sem permissão).');
-        return;
-      }
-
-      if (deletedIds.size < ids.length) {
-        console.warn(`Apenas ${deletedIds.size} de ${ids.length} leads foram excluídos (permissão parcial).`);
-      }
-
-      set({ leads: leads.filter((l) => !deletedIds.has(l.id)) });
+      const idsSet = new Set(ids);
+      set({ leads: leads.filter((l) => !idsSet.has(l.id)) });
     },
 
     addActivity: async (leadId, type, content) => {
@@ -760,20 +659,6 @@ export const useCRMStore = create<CRMState>()((set, get) => {
           type: 'warning',
           title: '📞 Retornar ligação',
           message: `A tentativa de contato com ${lead?.nome ?? 'este lead'}${lead?.nomeEmpresa ? ` (${lead.nomeEmpresa})` : ''} não teve sucesso. Lembre-se de retornar a ligação.`,
-          leadId,
-        });
-      }
-
-      // 📅 Automação: reunião marcada → move o card para a etapa "Reunião" + alerta
-      if (type === 'reuniao' || isMeetingScheduled(content)) {
-        const leadAtual = next.find((l) => l.id === leadId);
-        if (leadAtual && leadAtual.stage !== 'reuniao') {
-          await get().moveLead(leadId, 'reuniao');
-        }
-        await get().addAlert({
-          type: 'success',
-          title: '📅 Reunião agendada',
-          message: `Reunião marcada com ${leadAtual?.nome ?? 'este lead'}${leadAtual?.nomeEmpresa ? ` (${leadAtual.nomeEmpresa})` : ''}. O card foi movido para a etapa Reunião.`,
           leadId,
         });
       }
@@ -962,22 +847,6 @@ export function runDailyAlertAutomation(): void {
   storageSet(`corca_v3::automation::${currentUser.id}`, todayStr);
 
   const myLeads = leads;
-
-  // 🔄 Leads perdidos após reunião há 4+ meses → sugerir retomar contato
-  const FOUR_MONTHS_MS = 4 * 30 * 24 * 60 * 60 * 1000;
-  const lostAfterMeetingToRevisit = myLeads.filter((l) => {
-    if (!(l.motivoPerda && l.motivoPerda.trim() !== '')) return false;
-    const lostSince = new Date(l.updatedAt).getTime();
-    return Date.now() - lostSince >= FOUR_MONTHS_MS;
-  });
-
-  if (lostAfterMeetingToRevisit.length > 0) {
-    addAlert({
-      type: 'info',
-      title: `🔄 ${lostAfterMeetingToRevisit.length} lead(s) perdido(s) há 4+ meses`,
-      message: `Pode ser hora de retomar contato: ${lostAfterMeetingToRevisit.slice(0, 3).map((l) => l.nome).join(', ')}${lostAfterMeetingToRevisit.length > 3 ? ` e mais ${lostAfterMeetingToRevisit.length - 3}` : ''}. Talvez haja uma nova oportunidade.`,
-    });
-  }
 
   const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
   const staleLeads = myLeads.filter((l) => {
