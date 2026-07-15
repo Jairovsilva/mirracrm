@@ -386,12 +386,17 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
                 {filteredLeads.map(lead => {
                   const isSelected = selectedIds.has(lead.id);
 
-                  // 🆕 Status visual automático: verde (reunião marcada) / amarelo (retornar ligação)
+                  // 🆕 Status visual automático: vermelho (perdido pós-reunião) /
+                  // verde (reunião marcada) / amarelo (retornar ligação)
                   const cardStatus = getLeadCardStatus(lead);
 
                   let statusClasses = '';
                   if (!isSelected) {
-                    if (cardStatus === 'reuniao_marcada') {
+                    if (cardStatus === 'perdido_pos_reuniao') {
+                      statusClasses = theme === 'dark'
+                        ? 'border-rose-500/60 bg-rose-500/10 hover:border-rose-400'
+                        : 'border-rose-400 bg-rose-50 hover:border-rose-500';
+                    } else if (cardStatus === 'reuniao_marcada') {
                       statusClasses = theme === 'dark'
                         ? 'border-emerald-500/60 bg-emerald-500/10 hover:border-emerald-400'
                         : 'border-emerald-400 bg-emerald-50 hover:border-emerald-500';
