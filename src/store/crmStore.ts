@@ -372,14 +372,6 @@ export const useCRMStore = create<CRMState>()((set, get) => {
         return { ok: false, error: signUpError?.message || 'Erro ao cadastrar.' };
       }
 
-      // 🛡️ Proteção contra enumeração de e-mails do Supabase: quando o e-mail
-      // já existe, ele pode devolver "sucesso" com o MESMO usuário antigo em
-      // vez de um erro. Nesse caso, `identities` vem vazio — é assim que
-      // detectamos que não é um cadastro novo de verdade.
-      if (signUpData.user.identities && signUpData.user.identities.length === 0) {
-        return { ok: false, error: 'Este email já está cadastrado. Faça login com sua senha.' };
-      }
-
       const { data: countInScope } = await supabase.rpc('count_profiles_in_scope', { p_scope_key: scopeKey });
       const role: UserRole = (countInScope ?? 0) === 0 ? 'owner' : 'vendedor';
 
