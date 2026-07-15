@@ -1,7 +1,7 @@
 'use client';
 import React, { useRef, useState } from 'react';
-import { useCRMStore, type Stage } from '@/src/store/crmStore';
-import { FileSpreadsheet, Trash2, GripVertical, Search, X, CheckSquare, Square, ListChecks } from 'lucide-react';
+import { useCRMStore, getLeadCardStatus, type Stage } from '@/src/store/crmStore';
+import { FileSpreadsheet, FileDown, Trash2, GripVertical, Search, X, CheckSquare, Square, ListChecks } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 interface KanbanViewProps {
@@ -12,16 +12,19 @@ interface KanbanViewProps {
 
 export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: KanbanViewProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { addLead, moveLead, deleteLead, deleteLeads, theme, leads } = useCRMStore();
+  const { addLead, moveLead, deleteLead, deleteLeads, theme, leads, currentUser } = useCRMStore();
   const [isProcessing, setIsProcessing] = useState(false);
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<Stage | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // 🆕 Modo de seleção múltipla para exclusão em massa
+  // 🆕 Modo de seleção múltipla para exclusão em massa (restrito ao owner)
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+
+  const isOwner = currentUser?.role === 'owner';
 
   const myLeads = leads;
 
@@ -43,7 +46,7 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
   };
 
   const handleBulkDelete = async () => {
-    if (selectedIds.size === 0) return;
+    if (!isOwner || selectedIds.size === 0) return;
     const confirmMsg = `Excluir ${selectedIds.size} lead(s) selecionado(s)? Essa ação não pode ser desfeita.`;
     if (!confirm(confirmMsg)) return;
 
@@ -52,6 +55,37 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
     setIsDeleting(false);
     setSelectedIds(new Set());
     setSelectionMode(false);
+  };
+
+  // 🆕 Exportar todos os leads da empresa para Excel (apenas owner)
+  const handleExportExcel = () => {
+    if (!isOwner) return;
+    setIsExporting(true);
+    try {
+      const rows = myLeads.map((lead) => ({
+        Nome: lead.nome,
+        Cargo: lead.cargo,
+        'E-mail': lead.emailCorporativo,
+        'Telefone Celular': lead.telefoneCelular,
+        'Telefone Fixo': lead.telefoneFixo,
+        Empresa: lead.nomeEmpresa,
+        CNPJ: lead.cnpj,
+        LinkedIn: lead.linkedin,
+        Etapa: lead.stage,
+        Temperatura: lead.temperatura,
+        'Valor da Proposta': lead.valorProposta,
+        'Criado em': lead.createdAt ? new Date(lead.createdAt).toLocaleDateString('pt-BR') : '',
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Leads');
+
+      const dataAtual = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(workbook, `leads_${dataAtual}.xlsx`);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const mapRowToLead = (row: any) => {
@@ -214,21 +248,42 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
             </p>
           </div>
 
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
             {!selectionMode ? (
               <>
                 <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".xlsx, .xls" className="hidden" />
-                <button
-                  type="button"
-                  onClick={toggleSelectionMode}
-                  className={`flex items-center gap-2 font-bold text-xs py-2.5 px-4 rounded-xl shadow-sm transition-all whitespace-nowrap border ${
-                    theme === 'dark'
-                      ? 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
-                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  <ListChecks className="w-4 h-4" /> Selecionar
-                </button>
+
+                {/* 🆕 Exportar Excel — apenas owner */}
+                {isOwner && (
+                  <button
+                    type="button"
+                    disabled={isExporting}
+                    onClick={handleExportExcel}
+                    className={`flex items-center gap-2 font-bold text-xs py-2.5 px-4 rounded-xl shadow-sm transition-all whitespace-nowrap border disabled:opacity-50 ${
+                      theme === 'dark'
+                        ? 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <FileDown className="w-4 h-4" /> {isExporting ? 'Exportando...' : 'Exportar Leads'}
+                  </button>
+                )}
+
+                {/* 🆕 Selecionar/excluir em massa — apenas owner */}
+                {isOwner && (
+                  <button
+                    type="button"
+                    onClick={toggleSelectionMode}
+                    className={`flex items-center gap-2 font-bold text-xs py-2.5 px-4 rounded-xl shadow-sm transition-all whitespace-nowrap border ${
+                      theme === 'dark'
+                        ? 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <ListChecks className="w-4 h-4" /> Selecionar
+                  </button>
+                )}
+
                 <button
                   type="button"
                   disabled={isProcessing}
@@ -330,6 +385,28 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
               <div className="flex-1 space-y-3 overflow-y-auto max-h-[600px] pr-1">
                 {filteredLeads.map(lead => {
                   const isSelected = selectedIds.has(lead.id);
+
+                  // 🆕 Status visual automático: vermelho (perdido pós-reunião) /
+                  // verde (reunião marcada) / amarelo (retornar ligação)
+                  const cardStatus = getLeadCardStatus(lead);
+
+                  let statusClasses = '';
+                  if (!isSelected) {
+                    if (cardStatus === 'perdido_pos_reuniao') {
+                      statusClasses = theme === 'dark'
+                        ? 'border-rose-500/60 bg-rose-500/10 hover:border-rose-400'
+                        : 'border-rose-400 bg-rose-50 hover:border-rose-500';
+                    } else if (cardStatus === 'reuniao_marcada') {
+                      statusClasses = theme === 'dark'
+                        ? 'border-emerald-500/60 bg-emerald-500/10 hover:border-emerald-400'
+                        : 'border-emerald-400 bg-emerald-50 hover:border-emerald-500';
+                    } else if (cardStatus === 'retornar_ligacao') {
+                      statusClasses = theme === 'dark'
+                        ? 'border-amber-500/60 bg-amber-500/10 hover:border-amber-400'
+                        : 'border-amber-400 bg-amber-50 hover:border-amber-500';
+                    }
+                  }
+
                   return (
                     <div
                       key={lead.id}
@@ -340,11 +417,13 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
                       className={`group p-4 rounded-xl border transition-all cursor-pointer ${
                         isSelected
                           ? 'border-indigo-500 bg-indigo-500/10 ring-1 ring-indigo-500/40'
-                          : draggedLeadId === lead.id
-                            ? 'opacity-40 border-dashed border-indigo-500'
-                            : theme === 'dark'
-                              ? 'bg-slate-900 border-slate-800 hover:border-indigo-500/50 hover:shadow-lg hover:shadow-indigo-500/10'
-                              : 'bg-slate-50 border-slate-200 shadow-sm hover:border-indigo-500/50 hover:shadow-md'
+                          : statusClasses
+                            ? statusClasses
+                            : draggedLeadId === lead.id
+                              ? 'opacity-40 border-dashed border-indigo-500'
+                              : theme === 'dark'
+                                ? 'bg-slate-900 border-slate-800 hover:border-indigo-500/50 hover:shadow-lg hover:shadow-indigo-500/10'
+                                : 'bg-slate-50 border-slate-200 shadow-sm hover:border-indigo-500/50 hover:shadow-md'
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2">
