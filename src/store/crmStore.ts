@@ -156,6 +156,34 @@ function isFailedContactAttempt(content: string): boolean {
   return FAILED_CONTACT_KEYWORDS.some((kw) => normalized.includes(kw));
 }
 
+// ─── Detecção de reunião marcada ────────────────────────────────────────────────
+
+const MEETING_SCHEDULED_KEYWORDS = [
+  'reuniao marcada', 'reuniao agendada', 'agendei reuniao', 'agendada reuniao',
+  'reuniao confirmada', 'marcamos reuniao', 'reuniao remarcada', 'call marcada',
+  'call agendada', 'agendado reuniao', 'marcou reuniao', 'reuniao para',
+  'confirmou reuniao', 'reuniao confirmou',
+];
+
+function isMeetingScheduled(content: string): boolean {
+  const normalized = normalizeText(content);
+  return MEETING_SCHEDULED_KEYWORDS.some((kw) => normalized.includes(kw));
+}
+
+// ─── Status visual do card (usado pelo Kanban para colorir o card) ─────────────
+// Não é um dado novo salvo no banco — é calculado a partir das atividades que
+// já existem, olhando a atividade mais recente do lead.
+
+export type LeadCardStatus = 'reuniao_marcada' | 'retornar_ligacao' | 'normal';
+
+export function getLeadCardStatus(lead: Lead): LeadCardStatus {
+  if (!lead.activities || lead.activities.length === 0) return 'normal';
+  const last = lead.activities[lead.activities.length - 1];
+  if (last.type === 'reuniao' || isMeetingScheduled(last.content)) return 'reuniao_marcada';
+  if (isFailedContactAttempt(last.content)) return 'retornar_ligacao';
+  return 'normal';
+}
+
 // ─── Mappers (linhas do banco em snake_case → objetos camelCase da store) ──────
 
 function mapProfileRow(row: any): UserProfile {
@@ -666,6 +694,20 @@ export const useCRMStore = create<CRMState>()((set, get) => {
           type: 'warning',
           title: '📞 Retornar ligação',
           message: `A tentativa de contato com ${lead?.nome ?? 'este lead'}${lead?.nomeEmpresa ? ` (${lead.nomeEmpresa})` : ''} não teve sucesso. Lembre-se de retornar a ligação.`,
+          leadId,
+        });
+      }
+
+      // 📅 Automação: reunião marcada → move o card para a etapa "Reunião" + alerta
+      if (type === 'reuniao' || isMeetingScheduled(content)) {
+        const leadAtual = next.find((l) => l.id === leadId);
+        if (leadAtual && leadAtual.stage !== 'reuniao') {
+          await get().moveLead(leadId, 'reuniao');
+        }
+        await get().addAlert({
+          type: 'success',
+          title: '📅 Reunião agendada',
+          message: `Reunião marcada com ${leadAtual?.nome ?? 'este lead'}${leadAtual?.nomeEmpresa ? ` (${leadAtual.nomeEmpresa})` : ''}. O card foi movido para a etapa Reunião.`,
           leadId,
         });
       }
