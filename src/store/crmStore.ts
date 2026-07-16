@@ -392,7 +392,20 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       );
 
       if (profileError) {
-        return { ok: false, error: profileError.message };
+        // Diagnóstico completo, direto na tela — sem precisar abrir o DevTools.
+        const temSessao = !!signUpData.session;
+        const urlAtual = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'NÃO DEFINIDA';
+        const detalhes = [
+          `Mensagem: ${profileError.message}`,
+          profileError.code ? `Código: ${profileError.code}` : '',
+          (profileError as any).details ? `Detalhes: ${(profileError as any).details}` : '',
+          (profileError as any).hint ? `Dica: ${(profileError as any).hint}` : '',
+          `Sessão criada no signUp: ${temSessao ? 'SIM' : 'NÃO'}`,
+          `Projeto Supabase em uso: ${urlAtual}`,
+        ].filter(Boolean).join(' | ');
+
+        console.error('Erro detalhado ao criar perfil:', detalhes);
+        return { ok: false, error: detalhes };
       }
 
       const profile: UserProfile = {
