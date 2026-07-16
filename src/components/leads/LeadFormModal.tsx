@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { X, Search, Loader2, Users } from 'lucide-react';
+import { X, Search, Loader2, Users, FileCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface LeadFormModalProps {
@@ -43,7 +43,11 @@ export function LeadFormModal({ leadId, onClose }: LeadFormModalProps) {
     motivoPerda: '',
   });
 
-  // 🆕 Busca pública de CNPJ (Receita Federal via BrasilAPI)
+  // Novos campos para controle de clientes e fechamento
+  const [propostaAceita, setPropostaAceita] = useState(false);
+  const [arquivoPropostaUrl, setArquivoPropostaUrl] = useState('');
+
+  // Busca pública de CNPJ
   const [cnpjLoading, setCnpjLoading] = useState(false);
   const [cnpjError, setCnpjError] = useState('');
   const [cnpjSocios, setCnpjSocios] = useState<CnpjSocio[]>([]);
@@ -64,6 +68,8 @@ export function LeadFormModal({ leadId, onClose }: LeadFormModalProps) {
         valorProposta: editingLead.valorProposta || '',
         motivoPerda: editingLead.motivoPerda || '',
       });
+      setPropostaAceita(!!editingLead.propostaAceita);
+      setArquivoPropostaUrl(editingLead.arquivoPropostaUrl || '');
     }
   }, [editingLead]);
 
@@ -120,6 +126,8 @@ export function LeadFormModal({ leadId, onClose }: LeadFormModalProps) {
       stage: form.stage,
       valorProposta: form.valorProposta ? Number(form.valorProposta) : 0,
       motivoPerda: form.motivoPerda || undefined,
+      propostaAceita: propostaAceita,
+      arquivoPropostaUrl: arquivoPropostaUrl || undefined,
     };
 
     if (editingLead) {
@@ -240,6 +248,7 @@ export function LeadFormModal({ leadId, onClose }: LeadFormModalProps) {
                   {(['frio', 'morno', 'quente'] as Temperature[]).map((temp) => (
                     <button
                       key={temp}
+                      type="button"
                       onClick={() => setForm({ ...form, temperatura: temp })}
                       className={cn(
                         'py-2 rounded-lg border text-xs font-medium transition-all capitalize',
@@ -283,6 +292,56 @@ export function LeadFormModal({ leadId, onClose }: LeadFormModalProps) {
                   className="min-h-[60px] resize-none text-sm"
                 />
               </div>
+
+              {/* 🆕 Seção de Fechamento / Conversão em Cliente */}
+              <div className="space-y-3 sm:col-span-2 border-t border-border pt-4 mt-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label className="text-sm font-bold flex items-center gap-1.5">
+                      <FileCheck className="w-4 h-4 text-emerald-500" />
+                      Status de Contrato & Venda
+                    </Label>
+                    <p className="text-xs text-muted-foreground">Marque se o lead aprovou a proposta comercial</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant={propostaAceita ? "default" : "outline"}
+                    className={cn(
+                      "h-10 transition-all font-semibold text-xs",
+                      propostaAceita ? "bg-emerald-600 hover:bg-emerald-700 text-white border-none" : ""
+                    )}
+                    onClick={() => {
+                      const proximoStatus = !propostaAceita;
+                      setPropostaAceita(proximoStatus);
+                      if (proximoStatus) {
+                        setForm(prev => ({ ...prev, stage: 'fim_cadencia' }));
+                      }
+                    }}
+                  >
+                    {propostaAceita ? "✅ Proposta Comercial Aceita!" : "Marcar Proposta como Aceita"}
+                  </Button>
+                </div>
+
+                {propostaAceita && (
+                  <div className="p-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 space-y-2.5 animate-scale-in">
+                    <Label htmlFor="arquivoPropostaUrl" className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                      Link de Anexo do Contrato / Proposta Assinada:
+                    </Label>
+                    <Input
+                      id="arquivoPropostaUrl"
+                      type="text"
+                      placeholder="Cole a URL do documento (Google Drive, Dropbox, etc.)"
+                      value={arquivoPropostaUrl}
+                      onChange={(e) => setArquivoPropostaUrl(e.target.value)}
+                      className="h-10 border-emerald-500/20 focus:border-emerald-500 focus:ring-emerald-500"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Este registro será listado automaticamente na aba de <b>Clientes</b> e somado no cálculo de taxas de conversão de fechamento de negócios.
+                    </p>
+                  </div>
+                )}
+              </div>
+
             </div>
           </div>
 
