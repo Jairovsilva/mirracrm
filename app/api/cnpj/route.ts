@@ -13,7 +13,9 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`);
+    const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`, {
+      next: { revalidate: 60 } // Evita requisições repetidas idênticas em curto prazo
+    });
 
     if (!res.ok) {
       return NextResponse.json(
@@ -26,20 +28,20 @@ export async function GET(req: NextRequest) {
 
     const ddd = data.ddd_telefone_1 ? String(data.ddd_telefone_1).slice(0, 2) : '';
     const numero = data.ddd_telefone_1 ? String(data.ddd_telefone_1).slice(2) : '';
-    const telefone = ddd && numero ? `(${ddd}) ${numero}` : '';
+    const telefone = ddd && numero ? `(${ddd}) ${numero.trim()}` : '';
 
     const socios = Array.isArray(data.qsa)
       ? data.qsa.map((s: any) => ({
-          nome: s.nome_socio ?? '',
-          cargo: s.qualificacao_socio ?? '',
+          nome: s.nome_socio ?? s.nome ?? 'Sócio Não Identificado',
+          cargo: s.qualificacao_socio ?? s.qualificacao ?? 'Sócio/Administrador',
         }))
       : [];
 
     return NextResponse.json({
       ok: true,
       data: {
-        razaoSocial: data.razao_social ?? '',
-        nomeFantasia: data.nome_fantasia ?? '',
+        razaoSocial: data.razao_social ?? data.nome_empresarial ?? '',
+        nomeFantasia: data.nome_fantasia ?? data.fantasia ?? '',
         telefone,
         email: data.email ?? '',
         situacao: data.descricao_situacao_cadastral ?? '',
