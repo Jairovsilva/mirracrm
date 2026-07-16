@@ -359,25 +359,9 @@ export const useCRMStore = create<CRMState>()((set, get) => {
 
       const { scopeKey, accountType, companyName } = deriveScopeKey(clean);
 
-      // ── ALTERADO: role calculado ANTES do signUp para poder ser enviado
-      // como metadata. Assim, o gatilho do banco (handle_new_user) já cria
-      // o perfil com os dados CORRETOS desde o primeiro instante — funciona
-      // igual, esteja a confirmação de e-mail ligada ou desligada. ──
-      const { data: countInScope } = await supabase.rpc('count_profiles_in_scope', { p_scope_key: scopeKey });
-      const role: UserRole = (countInScope ?? 0) === 0 ? 'owner' : 'vendedor';
-
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: clean,
         password,
-        options: {
-          data: {
-            name: name.trim(),
-            role,
-            account_type: accountType,
-            scope_key: scopeKey,
-            company_name: companyName,
-          },
-        },
       });
 
       if (signUpError || !signUpData.user) {
@@ -388,8 +372,11 @@ export const useCRMStore = create<CRMState>()((set, get) => {
         return { ok: false, error: signUpError?.message || 'Erro ao cadastrar.' };
       }
 
+      const { data: countInScope } = await supabase.rpc('count_profiles_in_scope', { p_scope_key: scopeKey });
+      const role: UserRole = (countInScope ?? 0) === 0 ? 'owner' : 'vendedor';
+
       // upsert em vez de insert: se já existir uma linha para este id (por
-      // exemplo, criada pelo gatilho automático do banco), ATUALIZAMOS
+      // exemplo, criada por um gatilho automático do banco), ATUALIZAMOS
       // com os dados corretos em vez de travar tentando criar duplicata.
       const { error: profileError } = await supabase.from('profiles').upsert(
         {
@@ -514,14 +501,6 @@ export const useCRMStore = create<CRMState>()((set, get) => {
         leads: [],
         alerts: [],
       });
-
-      // ── ALTERADO: redirecionamento feito AQUI DENTRO, no próprio store —
-      // garante que o usuário só é levado para a tela de login DEPOIS que a
-      // sessão já foi completamente limpa, não importa qual botão/tela
-      // chamou o logout() (Sidebar, Configurações, evento customizado, etc). ──
-      if (typeof window !== 'undefined') {
-        window.location.replace('/');
-      }
     },
 
     changePassword: async (newPassword) => {
