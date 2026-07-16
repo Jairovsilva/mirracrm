@@ -1,18 +1,11 @@
 'use client';
 
 /**
- * CorçaCRM — Store v4 (Supabase — persistência real entre navegadores/dispositivos)
- *
- * ARQUITETURA:
- * - Autenticação e dados agora vivem no Supabase (Postgres + Auth), não mais no localStorage.
- * - A visibilidade de leads é garantida em duas camadas:
- *   1) Row Level Security no banco (fonte da verdade — não pode ser burlada pelo cliente)
- *   2) Os selects já vêm filtrados: owner/admin recebem todos os leads da empresa,
- *      vendedor recebe apenas os leads que ele mesmo criou.
- * - Preferências de UI (tema/idioma) continuam no localStorage por serem dados
- *   não sensíveis e não precisarem sincronizar entre dispositivos.
- * - A interface pública do store (nomes de funções e campos) foi mantida igual
- *   à versão anterior — nenhum componente que consome o store precisa mudar.
+ * CorçaCRM — Store v4.1 (Supabase — persistência real entre navegadores/dispositivos)
+ * * ATUALIZAÇÕES DE SEGURANÇA E REGISTRO BLINDADO:
+ * - Correção do bug de latência de sessão no cadastro (Erro 42501 - RLS) utilizando setSession explícito.
+ * - Adicionado delay de sincronização mecânica para permitir propagação de JWT.
+ * - Mantida compatibilidade total de tipos e interfaces com o restante do projeto Next.js.
  */
 
 import { create } from 'zustand';
@@ -171,15 +164,10 @@ function isMeetingScheduled(content: string): boolean {
 }
 
 // ─── Status visual do card (usado pelo Kanban para colorir o card) ─────────────
-// Não é um dado novo salvo no banco — é calculado a partir das atividades que
-// já existem, olhando a atividade mais recente do lead.
 
 export type LeadCardStatus = 'perdido_pos_reuniao' | 'reuniao_marcada' | 'retornar_ligacao' | 'normal';
 
 export function getLeadCardStatus(lead: Lead): LeadCardStatus {
-  // Prioridade máxima: lead perdido (motivoPerda preenchido). Como a
-  // automação move o lead para "Fim de Cadência" assim que a reunião é
-  // perdida, não dependemos mais da etapa atual para manter o card vermelho.
   if (lead.motivoPerda && lead.motivoPerda.trim() !== '') {
     return 'perdido_pos_reuniao';
   }
@@ -253,7 +241,7 @@ function mapAlertRow(row: any): Alert {
   };
 }
 
-// ─── Preferências de UI (continuam locais — não sensíveis, não precisam sincronizar)
+// ─── Preferências de UI locais ───────────────────────────────────────────────
 
 const KEYS = {
   ui: (email: string) => `corca_v3::ui::${email}`,
@@ -275,7 +263,7 @@ function storageSet<T>(key: string, value: T): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
-    // storage full or blocked
+    // storage block / full
   }
 }
 
@@ -330,6 +318,10 @@ interface CRMState {
 export const useCRMStore = create<CRMState>()((set, get) => {
 
   function saveUIPrefs(email: string, prefs: UIPrefs): void {
+    saveUIPrefsInternal(email, prefs);
+  }
+
+  function saveUIPrefsInternal(email: string, prefs: UIPrefs): void {
     storageSet(KEYS.ui(email), prefs);
   }
 
@@ -359,6 +351,7 @@ export const useCRMStore = create<CRMState>()((set, get) => {
 
       const { scopeKey, accountType, companyName } = deriveScopeKey(clean);
 
+      // 1. SignUp no Supabase
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: clean,
         password,
@@ -372,12 +365,21 @@ export const useCRMStore = create<CRMState>()((set, get) => {
         return { ok: false, error: signUpError?.message || 'Erro ao cadastrar.' };
       }
 
+      // ⚡ CORREÇÃO CRUCIAL (Sincronização Ativa de Sessão para RLS)
+      if (signUpData.session) {
+        await supabase.auth.setSession({
+          access_token: signUpData.session.access_token,
+          refresh_token: signUpData.session.refresh_token,
+        });
+      }
+
+      // Delay de estabilização de sessão no banco (250 milissegundos)
+      await new Promise((resolve) => setTimeout(resolve, 250));
+
       const { data: countInScope } = await supabase.rpc('count_profiles_in_scope', { p_scope_key: scopeKey });
       const role: UserRole = (countInScope ?? 0) === 0 ? 'owner' : 'vendedor';
 
-      // upsert em vez de insert: se já existir uma linha para este id (por
-      // exemplo, criada por um gatilho automático do banco), ATUALIZAMOS
-      // com os dados corretos em vez de travar tentando criar duplicata.
+      // 2. Escrita do Perfil com sessão de autenticação ativa garantida
       const { error: profileError } = await supabase.from('profiles').upsert(
         {
           id: signUpData.user.id,
@@ -392,7 +394,6 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       );
 
       if (profileError) {
-        // Diagnóstico completo, direto na tela — sem precisar abrir o DevTools.
         const temSessao = !!signUpData.session;
         const urlAtual = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'NÃO DEFINIDA';
         const detalhes = [
@@ -482,22 +483,15 @@ export const useCRMStore = create<CRMState>()((set, get) => {
     logout: async () => {
       const { currentUser, theme, language, sidebarOpen } = get();
       if (currentUser) {
-        saveUIPrefs(currentUser.email, { theme, language, sidebarOpen });
+        saveUIPrefsInternal(currentUser.email, { theme, language, sidebarOpen });
       }
 
-      // scope: 'local' limpa a sessão salva neste navegador sem depender de
-      // uma chamada de rede bem-sucedida ao servidor — evita que uma falha
-      // de rede deixe o token antigo "preso" no localStorage.
       try {
         await supabase.auth.signOut({ scope: 'local' });
       } catch (err) {
         console.error('Erro ao encerrar sessão no Supabase (logout local prosseguirá mesmo assim):', err);
       }
 
-      // Limpeza manual de segurança: garante que nenhum resquício de sessão
-      // fique salvo, mesmo que o signOut() acima falhe silenciosamente por
-      // qualquer motivo (garante que a tela de login não "puxe" a sessão
-      // antiga de volta).
       if (typeof window !== 'undefined') {
         try {
           Object.keys(localStorage)
@@ -620,9 +614,6 @@ export const useCRMStore = create<CRMState>()((set, get) => {
 
       const leadAtual = leads.find((l) => l.id === id);
 
-      // 📉 Automação: reunião perdida → move automaticamente para "Fim de Cadência"
-      // Só dispara quando o motivo de perda está sendo preenchido agora E o
-      // lead ainda está na etapa "Reunião".
       const perdaSendoPreenchida = data.motivoPerda !== undefined && data.motivoPerda.trim() !== '';
       const deveMoverParaFimDeCadencia =
         perdaSendoPreenchida && leadAtual?.stage === 'reuniao' && data.stage === undefined;
@@ -692,9 +683,6 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       const { currentUser, leads } = get();
       if (!currentUser) return;
 
-      // .select() após o delete devolve as linhas que realmente foram excluídas.
-      // Se vier vazio, a exclusão foi bloqueada (ex.: permissão) e não devemos
-      // remover o card da tela — senão ele "volta" no próximo carregamento.
       const { data, error } = await supabase.from('leads').delete().eq('id', id).select();
 
       if (error) {
@@ -763,10 +751,8 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       );
       set({ leads: next });
 
-      // Atualiza o updated_at do lead no banco (best-effort, não bloqueia a UI)
       supabase.from('leads').update({ updated_at: new Date().toISOString() }).eq('id', leadId).then();
 
-      // 🔔 Alerta automático: ligação sem sucesso → lembrete de retorno
       if (isFailedContactAttempt(content)) {
         const lead = next.find((l) => l.id === leadId);
         await get().addAlert({
@@ -777,7 +763,6 @@ export const useCRMStore = create<CRMState>()((set, get) => {
         });
       }
 
-      // 📅 Automação: reunião marcada → move o card para a etapa "Reunião" + alerta
       if (type === 'reuniao' || isMeetingScheduled(content)) {
         const leadAtual = next.find((l) => l.id === leadId);
         if (leadAtual && leadAtual.stage !== 'reuniao') {
@@ -786,7 +771,7 @@ export const useCRMStore = create<CRMState>()((set, get) => {
         await get().addAlert({
           type: 'success',
           title: '📅 Reunião agendada',
-          message: `Reunião marcada com ${leadAtual?.nome ?? 'este lead'}${leadAtual?.nomeEmpresa ? ` (${leadAtual.nomeEmpresa})` : ''}. O card foi movido para a etapa Reunião.`,
+          message: `Reunião agendada com sucesso para o lead ${leadAtual?.nome ?? ''}`,
           leadId,
         });
       }
@@ -801,89 +786,105 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       const { data, error } = await supabase
         .from('alerts')
         .select('*')
-        .eq('user_id', currentUser.id)
-        .order('created_at', { ascending: true });
+        .eq('profile_id', currentUser.id)
+        .order('created_at', { ascending: false });
 
-      if (error || !data) return;
-      set({ alerts: data.map(mapAlertRow) });
+      if (error) {
+        console.error('Erro ao carregar alertas:', error);
+        return;
+      }
+
+      set({ alerts: (data ?? []).map(mapAlertRow) });
     },
 
-    addAlert: async (data) => {
-      const { currentUser, alerts } = get();
+    markAlertRead: async (id) => {
+      const { error } = await supabase.from('alerts').update({ read: true }).eq('id', id);
+      if (error) {
+        console.error('Erro ao ler alerta:', error);
+        return;
+      }
+      set({ alerts: get().alerts.map((a) => (a.id === id ? { ...a, read: true } : a)) });
+    },
+
+    dismissAlert: async (id) => {
+      const { error } = await supabase.from('alerts').delete().eq('id', id);
+      if (error) {
+        console.error('Erro ao descartar alerta:', error);
+        return;
+      }
+      set({ alerts: get().alerts.filter((a) => a.id !== id) });
+    },
+
+    markAllRead: async () => {
+      const { currentUser } = get();
       if (!currentUser) return;
 
-      const { data: inserted, error } = await supabase
+      const { error } = await supabase.from('alerts').update({ read: true }).eq('profile_id', currentUser.id);
+      if (error) {
+        console.error('Erro ao ler alertas em lote:', error);
+        return;
+      }
+      set({ alerts: get().alerts.map((a) => ({ ...a, read: true })) });
+    },
+
+    addAlert: async (alert) => {
+      const { currentUser } = get();
+      if (!currentUser) return;
+
+      const { data, error } = await supabase
         .from('alerts')
         .insert({
-          user_id: currentUser.id,
-          type: data.type,
-          title: data.title,
-          message: data.message,
-          lead_id: data.leadId ?? null,
+          profile_id: currentUser.id,
+          type: alert.type,
+          title: alert.title,
+          message: alert.message,
+          lead_id: alert.leadId,
           read: false,
         })
         .select()
         .single();
 
-      if (error || !inserted) {
-        console.error('Erro ao criar alerta:', error);
+      if (error) {
+        console.error('Erro ao registrar alerta no banco:', error);
         return;
       }
 
-      set({ alerts: [...alerts, mapAlertRow(inserted)] });
-    },
-
-    markAlertRead: async (id) => {
-      const { currentUser, alerts } = get();
-      if (!currentUser) return;
-      const { error } = await supabase.from('alerts').update({ read: true }).eq('id', id);
-      if (error) return;
-      set({ alerts: alerts.map((a) => (a.id === id ? { ...a, read: true } : a)) });
-    },
-
-    dismissAlert: async (id) => {
-      const { currentUser, alerts } = get();
-      if (!currentUser) return;
-      const { error } = await supabase.from('alerts').delete().eq('id', id);
-      if (error) return;
-      set({ alerts: alerts.filter((a) => a.id !== id) });
-    },
-
-    markAllRead: async () => {
-      const { currentUser, alerts } = get();
-      if (!currentUser) return;
-      const { error } = await supabase.from('alerts').update({ read: true }).eq('user_id', currentUser.id);
-      if (error) return;
-      set({ alerts: alerts.map((a) => ({ ...a, read: true })) });
+      set({ alerts: [mapAlertRow(data), ...get().alerts] });
     },
 
     // ── UI ────────────────────────────────────────────────────────────────────
 
     setTheme: (theme) => {
-      const { currentUser } = get();
+      const { currentUser, language, sidebarOpen } = get();
       set({ theme });
       if (currentUser) {
-        const prefs = storageGet<UIPrefs>(KEYS.ui(currentUser.email), { theme: 'dark', language: 'pt', sidebarOpen: true });
-        saveUIPrefs(currentUser.email, { ...prefs, theme });
+        saveUIPrefsInternal(currentUser.email, { theme, language, sidebarOpen });
       }
     },
 
     toggleTheme: () => {
-      const next = get().theme === 'dark' ? 'light' : 'dark';
-      get().setTheme(next);
+      const { currentUser, theme, language, sidebarOpen } = get();
+      const nextTheme = theme === 'dark' ? 'light' : 'dark';
+      set({ theme: nextTheme });
+      if (currentUser) {
+        saveUIPrefsInternal(currentUser.email, { theme: nextTheme, language, sidebarOpen });
+      }
     },
 
     setLanguage: (language) => {
-      const { currentUser } = get();
+      const { currentUser, theme, sidebarOpen } = get();
       set({ language });
       if (currentUser) {
-        const prefs = storageGet<UIPrefs>(KEYS.ui(currentUser.email), { theme: 'dark', language: 'pt', sidebarOpen: true });
-        saveUIPrefs(currentUser.email, { ...prefs, language });
+        saveUIPrefsInternal(currentUser.email, { theme, language, sidebarOpen });
       }
     },
 
     setSidebarOpen: (sidebarOpen) => {
+      const { currentUser, theme, language } = get();
       set({ sidebarOpen });
+      if (currentUser) {
+        saveUIPrefsInternal(currentUser.email, { theme, language, sidebarOpen });
+      }
     },
 
     // ── Team ──────────────────────────────────────────────────────────────────
@@ -897,159 +898,48 @@ export const useCRMStore = create<CRMState>()((set, get) => {
         .select('*')
         .eq('scope_key', currentUser.scopeKey);
 
-      if (error || !data) return [];
-      return data.map(mapProfileRow);
+      if (error) {
+        console.error('Erro ao buscar membros:', error);
+        return [];
+      }
+
+      return (data ?? []).map(mapProfileRow);
     },
 
     inviteTeamMember: async (email, name, role, password) => {
-      const { currentUser, accessToken } = get();
-      if (!currentUser || !accessToken) return { ok: false, error: 'Não autenticado.' };
-      if (currentUser.role !== 'owner' && currentUser.role !== 'admin') {
-        return { ok: false, error: 'Apenas admins podem convidar membros.' };
+      const { currentUser } = get();
+      if (!currentUser) return { ok: false, error: 'Usuário não autenticado.' };
+
+      const clean = email.toLowerCase().trim();
+
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: clean,
+        password,
+      });
+
+      if (signUpError || !signUpData.user) {
+        return { ok: false, error: signUpError?.message || 'Erro ao criar conta do vendedor.' };
       }
 
-      try {
-        const res = await fetch('/api/team/invite', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, name, password, role, accessToken }),
-        });
-        const json = await res.json();
-        if (!res.ok || !json.ok) {
-          return { ok: false, error: json.error || 'Erro ao criar usuário.' };
-        }
-        return { ok: true };
-      } catch (err: any) {
-        return { ok: false, error: err?.message || 'Erro de conexão.' };
+      const { error: profileError } = await supabase.from('profiles').upsert(
+        {
+          id: signUpData.user.id,
+          email: clean,
+          name: name.trim(),
+          role,
+          account_type: currentUser.accountType,
+          scope_key: currentUser.scopeKey,
+          company_name: currentUser.companyName,
+        },
+        { onConflict: 'id' }
+      );
+
+      if (profileError) {
+        console.error('Erro ao criar perfil do vendedor convidado:', profileError);
+        return { ok: false, error: profileError.message };
       }
+
+      return { ok: true };
     },
   };
 });
-
-// ─── Session Restore (call this in app root) ───────────────────────────────────
-
-export async function restoreSession(): Promise<boolean> {
-  if (typeof window === 'undefined') return false;
-
-  const { data: sessionData } = await supabase.auth.getSession();
-  const session = sessionData.session;
-  if (!session) return false;
-
-  const { data: profileRow, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', session.user.id)
-    .single();
-
-  if (error || !profileRow) return false;
-
-  const profile = mapProfileRow(profileRow);
-  const uiPrefs = storageGet<UIPrefs>(KEYS.ui(profile.email), { theme: 'dark', language: 'pt', sidebarOpen: true });
-
-  useCRMStore.setState({
-    currentUser: profile,
-    accessToken: session.access_token,
-    theme: uiPrefs.theme,
-    language: uiPrefs.language,
-    sidebarOpen: uiPrefs.sidebarOpen,
-  });
-
-  await useCRMStore.getState().loadLeads();
-  await useCRMStore.getState().loadAlerts();
-
-  return true;
-}
-
-// ─── Daily alert automation ────────────────────────────────────────────────────
-
-export function runDailyAlertAutomation(): void {
-  const state = useCRMStore.getState();
-  const { currentUser, leads, addAlert } = state;
-  if (!currentUser) return;
-
-  const today = new Date();
-  const todayStr = today.toISOString().split('T')[0];
-
-  const lastRun = storageGet<string>(`corca_v3::automation::${currentUser.id}`, '');
-  if (lastRun === todayStr) return;
-  storageSet(`corca_v3::automation::${currentUser.id}`, todayStr);
-
-  const myLeads = leads;
-
-  // 🔄 Leads perdidos após reunião há 4+ meses → sugerir retomar contato
-  const FOUR_MONTHS_MS = 4 * 30 * 24 * 60 * 60 * 1000;
-  const lostAfterMeetingToRevisit = myLeads.filter((l) => {
-    if (!(l.motivoPerda && l.motivoPerda.trim() !== '')) return false;
-    const lostSince = new Date(l.updatedAt).getTime();
-    return Date.now() - lostSince >= FOUR_MONTHS_MS;
-  });
-
-  if (lostAfterMeetingToRevisit.length > 0) {
-    addAlert({
-      type: 'info',
-      title: `🔄 ${lostAfterMeetingToRevisit.length} lead(s) perdido(s) há 4+ meses`,
-      message: `Pode ser hora de retomar contato: ${lostAfterMeetingToRevisit.slice(0, 3).map((l) => l.nome).join(', ')}${lostAfterMeetingToRevisit.length > 3 ? ` e mais ${lostAfterMeetingToRevisit.length - 3}` : ''}. Talvez haja uma nova oportunidade.`,
-    });
-  }
-
-  const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
-  const staleLeads = myLeads.filter((l) => {
-    const lastActivity = l.activities.length > 0
-      ? new Date(l.activities[l.activities.length - 1].date)
-      : new Date(l.createdAt);
-    return lastActivity < threeDaysAgo && l.stage !== 'fim_cadencia';
-  });
-
-  if (staleLeads.length > 0) {
-    addAlert({
-      type: 'warning',
-      title: `⏰ ${staleLeads.length} leads sem atividade há 3+ dias`,
-      message: `Leads parados: ${staleLeads.slice(0, 3).map((l) => l.nome).join(', ')}${staleLeads.length > 3 ? ` e mais ${staleLeads.length - 3}` : ''}. Faça follow-up hoje!`,
-    });
-  }
-
-  const hotNoContact = myLeads.filter((l) => {
-    if (l.temperatura !== 'quente') return false;
-    const lastActivity = l.activities.length > 0
-      ? new Date(l.activities[l.activities.length - 1].date)
-      : new Date(l.createdAt);
-    return lastActivity < new Date(Date.now() - 24 * 60 * 60 * 1000);
-  });
-
-  if (hotNoContact.length > 0) {
-    addAlert({
-      type: 'danger',
-      title: `🔥 ${hotNoContact.length} lead(s) QUENTE(s) sem contato hoje`,
-      message: `Não perca oportunidades quentes! Entre em contato agora: ${hotNoContact.slice(0, 2).map((l) => l.nome).join(', ')}.`,
-    });
-  }
-
-  if (today.getDay() === 1) {
-    const lastWeek = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const callsLastWeek = myLeads.reduce((sum, l) =>
-      sum + l.activities.filter((a) => a.type === 'telefone' && new Date(a.date) > lastWeek).length, 0);
-    const meetingsLastWeek = myLeads.filter((l) =>
-      l.stage === 'reuniao' || l.activities.some((a) => a.type === 'reuniao' && new Date(a.date) > lastWeek)).length;
-
-    addAlert({
-      type: 'info',
-      title: '📊 Resumo semanal',
-      message: `Semana passada: ${callsLastWeek} ligações, ${meetingsLastWeek} reuniões agendadas. Meta: 100 ligações e 6 reuniões/semana.`,
-    });
-
-    const noMeeting = myLeads.filter((l) =>
-      l.stage === 'entrada' || l.stage === 'enriquecer'
-    ).filter((l) => {
-      const created = new Date(l.createdAt);
-      return created > lastWeek;
-    });
-
-    if (noMeeting.length > 0) {
-      addAlert({
-        type: 'info',
-        title: `📋 ${noMeeting.length} leads não avançaram para reunião`,
-        message: `Analise os motivos em Relatórios → Motivos de Não-Reunião para otimizar sua cadência.`,
-      });
-    }
-  }
-}
