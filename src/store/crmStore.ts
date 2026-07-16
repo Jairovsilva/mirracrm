@@ -1,10 +1,11 @@
 'use client';
 
 /**
- * CorçaCRM — Store v4.1 (Supabase — persistência real entre navegadores/dispositivos)
- * * ATUALIZAÇÕES DE SEGURANÇA E REGISTRO BLINDADO:
+ * CorçaCRM — Store v4.2 (Supabase — persistência real entre navegadores/dispositivos)
+ * * ATUALIZAÇÕES DE SEGURANÇA E COMPATIBILIDADE DE BUILD:
  * - Correção do bug de latência de sessão no cadastro (Erro 42501 - RLS) utilizando setSession explícito.
  * - Adicionado delay de sincronização mecânica para permitir propagação de JWT.
+ * - Exportação de `restoreSession` e `runDailyAlertAutomation` exigidos pelo app/page.tsx para evitar quebra de build no Netlify.
  * - Mantida compatibilidade total de tipos e interfaces com o restante do projeto Next.js.
  */
 
@@ -316,10 +317,6 @@ interface CRMState {
 // ─── Store Implementation ─────────────────────────────────────────────────────
 
 export const useCRMStore = create<CRMState>()((set, get) => {
-
-  function saveUIPrefs(email: string, prefs: UIPrefs): void {
-    saveUIPrefsInternal(email, prefs);
-  }
 
   function saveUIPrefsInternal(email: string, prefs: UIPrefs): void {
     storageSet(KEYS.ui(email), prefs);
@@ -943,3 +940,78 @@ export const useCRMStore = create<CRMState>()((set, get) => {
     },
   };
 });
+
+// ─── Exported Helper Functions (Requeridas por app/page.tsx) ───────────────────
+
+/**
+ * Restaura de forma robusta a sessão atual do Supabase e sincroniza o Zustand.
+ */
+export async function restoreSession(): Promise<boolean> {
+  try {
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !session?.user) {
+      return false;
+    }
+
+    const { data: profileRow, error: profileError } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', session.user.id)
+      .single();
+
+    if (profileError || !profileRow) {
+      return false;
+    }
+
+    const profile = mapProfileRow(profileRow);
+    const uiPrefs = storageGet<UIPrefs>(KEYS.ui(profile.email), { theme: 'dark', language: 'pt', sidebarOpen: true });
+
+    useCRMStore.setState({
+      currentUser: profile,
+      accessToken: session.access_token,
+      theme: uiPrefs.theme,
+      language: uiPrefs.language,
+      sidebarOpen: uiPrefs.sidebarOpen,
+    });
+
+    await useCRMStore.getState().loadLeads();
+    await useCRMStore.getState().loadAlerts();
+    return true;
+  } catch (err) {
+    console.error('Erro na automação de restauração:', err);
+    return false;
+  }
+}
+
+/**
+ * Roda rotinas diárias de automação de alertas de leads inativos.
+ */
+export async function runDailyAlertAutomation(): Promise<void> {
+  const store = useCRMStore.getState();
+  const { currentUser, leads } = store;
+  if (!currentUser || leads.length === 0) return;
+
+  const now = new Date();
+  for (const lead of leads) {
+    if (lead.updatedAt) {
+      const updatedDate = new Date(lead.updatedAt);
+      const diffTime = Math.abs(now.getTime() - updatedDate.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      // Alerta leads parados há mais de 7 dias e fora do fechamento
+      if (diffDays > 7 && lead.stage !== 'fim_cadencia') {
+        const hasAlert = store.alerts.some(
+          (a) => a.leadId === lead.id && a.title.includes('sem interação')
+        );
+        if (!hasAlert) {
+          await store.addAlert({
+            type: 'warning',
+            title: '⚠️ Lead sem interação recente',
+            message: `O lead ${lead.nome} (${lead.nomeEmpresa || 'Sem Empresa'}) está sem movimentações há mais de 7 dias.`,
+            leadId: lead.id,
+          });
+        }
+      }
+    }
+  }
+}
