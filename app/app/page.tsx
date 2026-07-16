@@ -54,9 +54,9 @@ export default function AppPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    // ── ALTERADO: agora é assíncrono e aguarda o logout terminar de
-    // verdade (incluindo a limpeza do localStorage) antes de redirecionar,
-    // e usa "replace" para não deixar a página anterior em cache ──
+    // ── ALTERADO: aguarda o logout terminar de verdade (incluindo a limpeza
+    // da sessão no Supabase) antes de redirecionar, e usa "replace" para não
+    // deixar a página anterior em cache — evita voltar sozinho para o CRM ──
     const handleLogoutEvent = async () => {
       await useCRMStore.getState().logout();
       window.location.replace('/');
