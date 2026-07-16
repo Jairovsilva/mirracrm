@@ -45,6 +45,8 @@ export interface Lead {
   motivoPerda?: string;
   motivoSemReuniao?: string;
   activities: Activity[];
+  propostaAceita?: boolean;         // 🆕 Adicionado mantendo a estrutura
+  arquivoPropostaUrl?: string;     // 🆕 Adicionado mantendo a estrutura
   readonly scopeKey: string;
   readonly createdByUserId: string;
   readonly createdAt: string;
@@ -206,6 +208,8 @@ function mapLeadRow(row: any, activities: Activity[]): Lead {
     probabilidade: Number(row.probabilidade ?? 0),
     motivoPerda: row.motivo_perda ?? undefined,
     motivoSemReuniao: row.motivo_sem_reuniao ?? undefined,
+    propostaAceita: !!row.proposta_aceita,                   // 🆕 Mapeado do banco
+    arquivoPropostaUrl: row.arquivo_proposta_url ?? undefined, // 🆕 Mapeado do banco
     activities,
     scopeKey: row.scope_key,
     createdByUserId: row.created_by_user_id,
@@ -308,7 +312,7 @@ interface CRMState {
 export const useCRMStore = create<CRMState>()((set, get) => {
 
   function saveUIPrefsInternal(email: string, prefs: UIPrefs): void {
-    storageSet(KEYS.ui(email), prefs);
+    saveUIPrefsInternal(email, prefs);
   }
 
   return {
@@ -556,6 +560,8 @@ export const useCRMStore = create<CRMState>()((set, get) => {
         valor_proposta: data.valorProposta ?? 0,
         probabilidade: STAGE_PROBABILITY[data.stage],
         motivo_perda: data.motivoPerda ?? null,
+        proposta_aceita: data.propostaAceita ?? false,       // 🆕 Sincronizado
+        arquivo_proposta_url: data.arquivoPropostaUrl ?? null, // 🆕 Sincronizado
         created_by_user_id: currentUser.id,
       };
 
@@ -606,6 +612,8 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       if (finalData.valorProposta !== undefined) payload.valor_proposta = finalData.valorProposta;
       if (finalData.motivoPerda !== undefined) payload.motivo_perda = finalData.motivoPerda;
       if (finalData.motivoSemReuniao !== undefined) payload.motivo_sem_reuniao = finalData.motivoSemReuniao;
+      if (finalData.propostaAceita !== undefined) payload.proposta_aceita = finalData.propostaAceita;       // 🆕 Sincronizado
+      if (finalData.arquivoPropostaUrl !== undefined) payload.arquivo_proposta_url = finalData.arquivoPropostaUrl; // 🆕 Sincronizado
 
       const { error } = await supabase.from('leads').update(payload).eq('id', id);
       if (error) return;
