@@ -96,7 +96,14 @@ export default function AppPage() {
   }
 
   return (
-    <div className="flex h-screen bg-background text-foreground overflow-hidden">
+    <div className="flex h-screen bg-background text-foreground overflow-hidden flex-col">
+      <div className="w-full bg-amber-500/90 dark:bg-amber-600/80 text-black dark:text-white text-[11px] font-semibold text-center py-1 px-4 flex items-center justify-center gap-2 shrink-0 z-50">
+        <span className="inline-flex items-center gap-1.5">
+          <span className="text-sm leading-none">🛠️</span>
+          DEVELOP — AMBIENTE DE TESTE
+        </span>
+      </div>
+      <div className="flex flex-1 overflow-hidden">
       <Sidebar activeView={activeView} onViewChange={setActiveView} />
 
       <div className="flex flex-col flex-1 w-full overflow-hidden">
@@ -152,6 +159,7 @@ export default function AppPage() {
       )}
 
       <AIAssistant />
+      </div>
     </div>
   );
 }
