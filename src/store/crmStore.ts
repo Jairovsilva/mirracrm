@@ -236,6 +236,24 @@ function mapAlertRow(row: any): Alert {
   };
 }
 
+// ─── Error Sanitization ────────────────────────────────────────────────────────
+
+function friendlyError(message: string | undefined | null): string {
+  if (!message) return 'Ocorreu um erro inesperado. Tente novamente.';
+  const lower = message.toLowerCase();
+  if (
+    lower.includes('failed to fetch') ||
+    lower.includes('network request failed') ||
+    lower.includes('networkerror') ||
+    lower.includes('err_connection') ||
+    lower.includes('err_name_not_resolved') ||
+    lower.includes('err_internet_disconnected')
+  ) {
+    return 'Sem conexão com o servidor. Verifique sua internet e tente novamente.';
+  }
+  return message;
+}
+
 // ─── UI Storage ───────────────────────────────────────────────────────────────
 
 const KEYS = {
@@ -345,7 +363,7 @@ export const useCRMStore = create<CRMState>()((set, get) => {
         if (msg.includes('already registered') || msg.includes('already exists')) {
           return { ok: false, error: 'Este email já está cadastrado. Faça login.' };
         }
-        return { ok: false, error: signUpError?.message || 'Erro ao cadastrar.' };
+        return { ok: false, error: friendlyError(signUpError?.message) };
       }
 
       if (signUpData.session) {
@@ -383,7 +401,7 @@ export const useCRMStore = create<CRMState>()((set, get) => {
         ].join(' | ');
 
         console.error('Erro ao criar perfil:', detalhes);
-        return { ok: false, error: detalhes };
+        return { ok: false, error: friendlyError(profileError.message) };
       }
 
       const profile: UserProfile = {
@@ -427,7 +445,7 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       });
 
       if (signInError || !signInData.user) {
-        return { ok: false, error: 'Email ou senha incorretos.' };
+        return { ok: false, error: friendlyError(signInError?.message) || 'Email ou senha incorretos.' };
       }
 
       const { data: profileRow, error: profileError } = await supabase
@@ -493,7 +511,7 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       }
       const { error } = await supabase.auth.updateUser({ password: newPassword });
       if (error) {
-        return { ok: false, error: error.message };
+        return { ok: false, error: friendlyError(error.message) };
       }
       return { ok: true };
     },
@@ -787,7 +805,7 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       });
 
       if (signUpError || !signUpData.user) {
-        return { ok: false, error: signUpError?.message || 'Erro ao criar conta.' };
+        return { ok: false, error: friendlyError(signUpError?.message) };
       }
 
       const { error: profileError } = await supabase.from('profiles').upsert({
@@ -801,7 +819,7 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       });
 
       if (profileError) {
-        return { ok: false, error: profileError.message };
+        return { ok: false, error: friendlyError(profileError.message) };
       }
 
       return { ok: true };
