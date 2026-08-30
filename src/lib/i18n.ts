@@ -4,6 +4,7 @@ export const translations = {
   pt: {
     appName: 'MirraCRM',
     tagline: 'Inteligência comercial B2B',
+
     login: {
       title: 'Acesse sua conta',
       subtitle: 'Use seu e-mail corporativo para entrar',
@@ -14,27 +15,33 @@ export const translations = {
       loginButton: 'Entrar',
       corporateOnly: 'Apenas e-mails corporativos são permitidos',
       invalidEmail: 'Por favor, insira um e-mail corporativo válido',
-      footer: 'Ao entrar, você concorda com nossos Termos de Serviço e Política de Privacidade',
+      footer:
+        'Ao entrar, você concorda com nossos Termos de Serviço e Política de Privacidade',
     },
+
     nav: {
       dashboard: 'Dashboard',
       kanban: 'Funil de Vendas',
       leads: 'Leads',
+      whatsapp: 'WhatsApp',
       analytics: 'Relatórios',
       team: 'Equipe',
       settings: 'Configurações',
     },
+
     stages: {
       entrada: 'Entrada',
       enriquecer: 'Enriquecer',
       reuniao: 'Reunião',
       fim_cadencia: 'Fim de Cadência',
     },
+
     temperature: {
       frio: 'Frio',
       morno: 'Morno',
       quente: 'Quente',
     },
+
     lead: {
       name: 'Nome',
       role: 'Cargo',
@@ -52,13 +59,15 @@ export const translations = {
       addLead: 'Adicionar Lead',
       editLead: 'Editar Lead',
       deleteLead: 'Excluir Lead',
-      deleteConfirm: 'Tem certeza que deseja excluir este lead?',
+      deleteConfirm:
+        'Tem certeza que deseja excluir este lead?',
       save: 'Salvar',
       cancel: 'Cancelar',
       noLeads: 'Nenhum lead nesta etapa',
       searchPlaceholder: 'Buscar leads...',
       detail: 'Detalhes do Lead',
       addActivity: 'Adicionar Atividade',
+
       activityType: {
         telefone: 'Telefone',
         email: 'E-mail',
@@ -67,9 +76,12 @@ export const translations = {
         whatsapp: 'WhatsApp',
         linkedin: 'LinkedIn',
       },
+
       writeNote: 'Escreva uma nota...',
-      noActivities: 'Nenhuma atividade registrada',
+      noActivities:
+        'Nenhuma atividade registrada',
     },
+
     dashboard: {
       title: 'Dashboard',
       welcome: 'Bem-vindo',
@@ -79,15 +91,43 @@ export const translations = {
       pipelineValue: 'Valor do Pipeline',
       recentLeads: 'Leads Recentes',
       stageDistribution: 'Distribuição por Etapa',
-      temperatureDistribution: 'Distribuição por Temperatura',
+      temperatureDistribution:
+        'Distribuição por Temperatura',
       pipelineByStage: 'Pipeline por Etapa',
     },
+
+    whatsapp: {
+      title: 'WhatsApp',
+      subtitle:
+        'Central de atendimento comercial integrada ao CRM',
+      conversations: 'Conversas',
+      search: 'Buscar conversa...',
+      noConversations: 'Nenhuma conversa encontrada',
+      selectConversation:
+        'Selecione uma conversa para iniciar o atendimento',
+      connectionPending: 'Integração ainda não conectada',
+      connectionPendingDescription:
+        'A estrutura do módulo está pronta. Na próxima etapa conectaremos o Supabase e a WhatsApp Cloud API da Meta.',
+      leadsReady: 'CRM preparado',
+      leadsReadyDescription:
+        'Os contatos recebidos pelo WhatsApp poderão ser vinculados automaticamente aos leads e distribuídos aos vendedores.',
+      status: 'Status',
+      disconnected: 'Não conectado',
+      inbox: 'Caixa de entrada',
+      newConversation: 'Nova conversa',
+      unread: 'Não lidas',
+      assignedTo: 'Responsável',
+      sendMessage: 'Enviar',
+      typeMessage: 'Digite uma mensagem...',
+    },
+
     alerts: {
       title: 'Alertas',
       markAllRead: 'Marcar todos como lidos',
       noAlerts: 'Nenhum alerta no momento',
       unread: 'não lidos',
     },
+
     common: {
       search: 'Buscar',
       filter: 'Filtrar',
@@ -111,9 +151,11 @@ export const translations = {
       view: 'Ver',
     },
   },
+
   en: {
     appName: 'MirraCRM',
     tagline: 'B2B commercial intelligence',
+
     login: {
       title: 'Access your account',
       subtitle: 'Use your corporate email to sign in',
@@ -124,27 +166,33 @@ export const translations = {
       loginButton: 'Sign In',
       corporateOnly: 'Only corporate emails are allowed',
       invalidEmail: 'Please enter a valid corporate email',
-      footer: 'By signing in, you agree to our Terms of Service and Privacy Policy',
+      footer:
+        'By signing in, you agree to our Terms of Service and Privacy Policy',
     },
+
     nav: {
       dashboard: 'Dashboard',
       kanban: 'Sales Funnel',
       leads: 'Leads',
+      whatsapp: 'WhatsApp',
       analytics: 'Reports',
       team: 'Team',
       settings: 'Settings',
     },
+
     stages: {
       entrada: 'Inbound',
       enriquecer: 'Enrich',
       reuniao: 'Meeting',
       fim_cadencia: 'End of Cadence',
     },
+
     temperature: {
       frio: 'Cold',
       morno: 'Warm',
       quente: 'Hot',
     },
+
     lead: {
       name: 'Name',
       role: 'Role',
@@ -162,13 +210,15 @@ export const translations = {
       addLead: 'Add Lead',
       editLead: 'Edit Lead',
       deleteLead: 'Delete Lead',
-      deleteConfirm: 'Are you sure you want to delete this lead?',
+      deleteConfirm:
+        'Are you sure you want to delete this lead?',
       save: 'Save',
       cancel: 'Cancel',
       noLeads: 'No leads in this stage',
       searchPlaceholder: 'Search leads...',
       detail: 'Lead Details',
       addActivity: 'Add Activity',
+
       activityType: {
         telefone: 'Phone',
         email: 'Email',
@@ -177,9 +227,11 @@ export const translations = {
         whatsapp: 'WhatsApp',
         linkedin: 'LinkedIn',
       },
+
       writeNote: 'Write a note...',
       noActivities: 'No activities recorded',
     },
+
     dashboard: {
       title: 'Dashboard',
       welcome: 'Welcome',
@@ -189,15 +241,43 @@ export const translations = {
       pipelineValue: 'Pipeline Value',
       recentLeads: 'Recent Leads',
       stageDistribution: 'Distribution by Stage',
-      temperatureDistribution: 'Distribution by Temperature',
+      temperatureDistribution:
+        'Distribution by Temperature',
       pipelineByStage: 'Pipeline by Stage',
     },
+
+    whatsapp: {
+      title: 'WhatsApp',
+      subtitle:
+        'Commercial service center integrated with the CRM',
+      conversations: 'Conversations',
+      search: 'Search conversation...',
+      noConversations: 'No conversations found',
+      selectConversation:
+        'Select a conversation to start service',
+      connectionPending: 'Integration not connected yet',
+      connectionPendingDescription:
+        'The module structure is ready. In the next step we will connect Supabase and Meta WhatsApp Cloud API.',
+      leadsReady: 'CRM ready',
+      leadsReadyDescription:
+        'WhatsApp contacts can be automatically linked to leads and assigned to sales representatives.',
+      status: 'Status',
+      disconnected: 'Not connected',
+      inbox: 'Inbox',
+      newConversation: 'New conversation',
+      unread: 'Unread',
+      assignedTo: 'Assigned to',
+      sendMessage: 'Send',
+      typeMessage: 'Type a message...',
+    },
+
     alerts: {
       title: 'Alerts',
       markAllRead: 'Mark all as read',
       noAlerts: 'No alerts at this time',
       unread: 'unread',
     },
+
     common: {
       search: 'Search',
       filter: 'Filter',
@@ -221,9 +301,11 @@ export const translations = {
       view: 'View',
     },
   },
+
   es: {
     appName: 'MirraCRM',
     tagline: 'Inteligencia comercial B2B',
+
     login: {
       title: 'Acceda a su cuenta',
       subtitle: 'Use su correo corporativo para ingresar',
@@ -232,29 +314,37 @@ export const translations = {
       microsoftLogin: 'Continuar con Microsoft',
       orDivider: 'o',
       loginButton: 'Ingresar',
-      corporateOnly: 'Solo se permiten correos corporativos',
-      invalidEmail: 'Por favor, ingrese un correo corporativo válido',
-      footer: 'Al ingresar, acepta nuestros Términos de Servicio y Política de Privacidad',
+      corporateOnly:
+        'Solo se permiten correos corporativos',
+      invalidEmail:
+        'Por favor, ingrese un correo corporativo válido',
+      footer:
+        'Al ingresar, acepta nuestros Términos de Servicio y Política de Privacidad',
     },
+
     nav: {
       dashboard: 'Panel',
       kanban: 'Embudo de Ventas',
       leads: 'Leads',
+      whatsapp: 'WhatsApp',
       analytics: 'Reportes',
       team: 'Equipo',
       settings: 'Configuración',
     },
+
     stages: {
       entrada: 'Entrada',
       enriquecer: 'Enriquecer',
       reuniao: 'Reunión',
       fim_cadencia: 'Fin de Cadencia',
     },
+
     temperature: {
       frio: 'Frío',
       morno: 'Tibio',
       quente: 'Caliente',
     },
+
     lead: {
       name: 'Nombre',
       role: 'Cargo',
@@ -272,13 +362,15 @@ export const translations = {
       addLead: 'Agregar Lead',
       editLead: 'Editar Lead',
       deleteLead: 'Eliminar Lead',
-      deleteConfirm: '¿Está seguro de que desea eliminar este lead?',
+      deleteConfirm:
+        '¿Está seguro de que desea eliminar este lead?',
       save: 'Guardar',
       cancel: 'Cancelar',
       noLeads: 'No hay leads en esta etapa',
       searchPlaceholder: 'Buscar leads...',
       detail: 'Detalles del Lead',
       addActivity: 'Agregar Actividad',
+
       activityType: {
         telefone: 'Teléfono',
         email: 'Correo',
@@ -287,9 +379,12 @@ export const translations = {
         whatsapp: 'WhatsApp',
         linkedin: 'LinkedIn',
       },
+
       writeNote: 'Escriba una nota...',
-      noActivities: 'No hay actividades registradas',
+      noActivities:
+        'No hay actividades registradas',
     },
+
     dashboard: {
       title: 'Panel',
       welcome: 'Bienvenido',
@@ -299,15 +394,43 @@ export const translations = {
       pipelineValue: 'Valor del Pipeline',
       recentLeads: 'Leads Recientes',
       stageDistribution: 'Distribución por Etapa',
-      temperatureDistribution: 'Distribución por Temperatura',
+      temperatureDistribution:
+        'Distribución por Temperatura',
       pipelineByStage: 'Pipeline por Etapa',
     },
+
+    whatsapp: {
+      title: 'WhatsApp',
+      subtitle:
+        'Central de atención comercial integrada al CRM',
+      conversations: 'Conversaciones',
+      search: 'Buscar conversación...',
+      noConversations: 'No se encontraron conversaciones',
+      selectConversation:
+        'Seleccione una conversación para iniciar la atención',
+      connectionPending: 'Integración aún no conectada',
+      connectionPendingDescription:
+        'La estructura del módulo está lista. En la próxima etapa conectaremos Supabase y WhatsApp Cloud API de Meta.',
+      leadsReady: 'CRM preparado',
+      leadsReadyDescription:
+        'Los contactos de WhatsApp podrán vincularse automáticamente con leads y asignarse a vendedores.',
+      status: 'Estado',
+      disconnected: 'No conectado',
+      inbox: 'Bandeja de entrada',
+      newConversation: 'Nueva conversación',
+      unread: 'No leídas',
+      assignedTo: 'Responsable',
+      sendMessage: 'Enviar',
+      typeMessage: 'Escriba un mensaje...',
+    },
+
     alerts: {
       title: 'Alertas',
       markAllRead: 'Marcar todos como leídos',
       noAlerts: 'No hay alertas en este momento',
       unread: 'no leídos',
     },
+
     common: {
       search: 'Buscar',
       filter: 'Filtrar',
@@ -333,4 +456,5 @@ export const translations = {
   },
 };
 
-export type TranslationKey = typeof translations.pt;
+export type TranslationKey =
+  typeof translations.pt;
