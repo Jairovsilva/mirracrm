@@ -2,28 +2,43 @@
 
 import { useState, useEffect } from 'react';
 import { useCRMStore, restoreSession, runDailyAlertAutomation } from '@/src/store/crmStore';
+
 import { Sidebar } from '@/src/components/layout/Sidebar';
 import { Header } from '@/src/components/layout/Header';
+
 import { DashboardView } from '@/src/components/views/DashboardView';
 import KanbanView from '@/src/components/views/KanbanView';
 import { LeadsView } from '@/src/components/views/LeadsView';
+import { WhatsAppView } from '@/src/components/views/WhatsAppView';
 import { AnalyticsView } from '@/src/components/views/AnalyticsView';
 import { TeamView } from '@/src/components/views/TeamView';
 import { SettingsView } from '@/src/components/views/SettingsView';
+
 import { LeadDetailDrawer } from '@/src/components/leads/LeadDetailDrawer';
 import { LeadFormModal } from '@/src/components/leads/LeadFormModal';
 import { AlertsPanel } from '@/src/components/alerts/AlertsPanel';
 import { AIAssistant } from '@/src/components/AIAssistant';
 
-export type ViewType = 'dashboard' | 'kanban' | 'leads' | 'analytics' | 'team' | 'settings';
+export type ViewType =
+  | 'dashboard'
+  | 'kanban'
+  | 'leads'
+  | 'whatsapp'
+  | 'analytics'
+  | 'team'
+  | 'settings';
 
 export default function AppPage() {
   const theme = useCRMStore((s) => s.theme);
+
   const [activeView, setActiveView] = useState<ViewType>('dashboard');
   const [showAlerts, setShowAlerts] = useState(false);
+
   const [leadFormOpen, setLeadFormOpen] = useState(false);
   const [leadFormId, setLeadFormId] = useState<string | null>(null);
+
   const [detailLeadId, setDetailLeadId] = useState<string | null>(null);
+
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthorized, setIsAuthorized] = useState(false);
 
@@ -34,6 +49,7 @@ export default function AppPage() {
       if (restored) {
         setIsAuthorized(true);
         setIsLoading(false);
+
         runDailyAlertAutomation();
       } else {
         window.location.href = '/';
@@ -43,7 +59,9 @@ export default function AppPage() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+
     const root = document.documentElement;
+
     if (theme === 'dark') {
       root.classList.add('dark');
     } else {
@@ -54,16 +72,21 @@ export default function AppPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    // ── ALTERADO: aguarda o logout terminar de verdade (incluindo a limpeza
-    // da sessão no Supabase) antes de redirecionar, e usa "replace" para não
-    // deixar a página anterior em cache — evita voltar sozinho para o CRM ──
     const handleLogoutEvent = async () => {
       await useCRMStore.getState().logout();
       window.location.replace('/');
     };
 
-    window.addEventListener('crm_logout_trigger', handleLogoutEvent);
-    return () => window.removeEventListener('crm_logout_trigger', handleLogoutEvent);
+    window.addEventListener(
+      'crm_logout_trigger',
+      handleLogoutEvent
+    );
+
+    return () =>
+      window.removeEventListener(
+        'crm_logout_trigger',
+        handleLogoutEvent
+      );
   }, []);
 
   const handleAddLead = () => {
@@ -88,8 +111,11 @@ export default function AppPage() {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center text-foreground font-sans">
         <div className="text-center space-y-3">
-          <p className="text-sm font-semibold text-muted-foreground">Autenticando chaves de segurança do workspace...</p>
-          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <p className="text-sm font-semibold text-muted-foreground">
+            Autenticando chaves de segurança do workspace...
+          </p>
+
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
         </div>
       </div>
     );
@@ -103,62 +129,88 @@ export default function AppPage() {
           DEVELOP — AMBIENTE DE TESTE
         </span>
       </div>
+
       <div className="flex flex-1 overflow-hidden">
-      <Sidebar activeView={activeView} onViewChange={setActiveView} />
-
-      <div className="flex flex-col flex-1 w-full overflow-hidden">
-        <Header
-          onAddLead={handleAddLead}
-          onToggleAlerts={() => setShowAlerts(!showAlerts)}
-          showAlerts={showAlerts}
+        <Sidebar
+          activeView={activeView}
+          onViewChange={setActiveView}
         />
 
-        <main className="flex-1 overflow-y-auto">
-          {activeView === 'dashboard' && (
-            <DashboardView
-              onOpenLead={handleOpenLead}
-              onAddLead={handleAddLead}
-              onViewKanban={handleViewKanban}
-            />
-          )}
-          {activeView === 'kanban' && (
-            <KanbanView
-              onOpenLead={handleOpenLead}
-              onAddLead={handleAddLead}
-              onEditLead={handleEditLead}
-            />
-          )}
-          {activeView === 'leads' && (
-            <LeadsView
-              onOpenLead={handleOpenLead}
-              onAddLead={handleAddLead}
-              onEditLead={handleEditLead}
-            />
-          )}
-          {activeView === 'analytics' && <AnalyticsView />}
-          {activeView === 'team' && <TeamView />}
-          {activeView === 'settings' && <SettingsView />}
-        </main>
-      </div>
+        <div className="flex flex-col flex-1 w-full overflow-hidden">
+          <Header
+            onAddLead={handleAddLead}
+            onToggleAlerts={() => setShowAlerts(!showAlerts)}
+            showAlerts={showAlerts}
+          />
 
-      {showAlerts && <AlertsPanel onClose={() => setShowAlerts(false)} />}
+          <main className="flex-1 overflow-y-auto">
+            {activeView === 'dashboard' && (
+              <DashboardView
+                onOpenLead={handleOpenLead}
+                onAddLead={handleAddLead}
+                onViewKanban={handleViewKanban}
+              />
+            )}
 
-      {leadFormOpen && (
-        <LeadFormModal leadId={leadFormId} onClose={() => setLeadFormOpen(false)} />
-      )}
+            {activeView === 'kanban' && (
+              <KanbanView
+                onOpenLead={handleOpenLead}
+                onAddLead={handleAddLead}
+                onEditLead={handleEditLead}
+              />
+            )}
 
-      {detailLeadId && (
-        <LeadDetailDrawer
-          leadId={detailLeadId}
-          onClose={() => setDetailLeadId(null)}
-          onEdit={() => {
-            handleEditLead(detailLeadId);
-            setDetailLeadId(null);
-          }}
-        />
-      )}
+            {activeView === 'leads' && (
+              <LeadsView
+                onOpenLead={handleOpenLead}
+                onAddLead={handleAddLead}
+                onEditLead={handleEditLead}
+              />
+            )}
 
-      <AIAssistant />
+            {activeView === 'whatsapp' && (
+              <WhatsAppView />
+            )}
+
+            {activeView === 'analytics' && (
+              <AnalyticsView />
+            )}
+
+            {activeView === 'team' && (
+              <TeamView />
+            )}
+
+            {activeView === 'settings' && (
+              <SettingsView />
+            )}
+          </main>
+        </div>
+
+        {showAlerts && (
+          <AlertsPanel
+            onClose={() => setShowAlerts(false)}
+          />
+        )}
+
+        {leadFormOpen && (
+          <LeadFormModal
+            leadId={leadFormId}
+            onClose={() => setLeadFormOpen(false)}
+          />
+        )}
+
+        {detailLeadId && (
+          <LeadDetailDrawer
+            leadId={detailLeadId}
+            onClose={() => setDetailLeadId(null)}
+            onEdit={() => {
+              handleEditLead(detailLeadId);
+              setDetailLeadId(null);
+            }}
+          />
+        )}
+
+        <AIAssistant />
       </div>
     </div>
   );
