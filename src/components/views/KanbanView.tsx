@@ -17,6 +17,7 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<Stage | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedSector, setSelectedSector] = useState('todos');
 
   // 🆕 Modo de seleção múltipla para exclusão em massa (restrito ao owner)
   const [selectionMode, setSelectionMode] = useState(false);
@@ -27,6 +28,14 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
   const isOwner = currentUser?.role === 'owner';
 
   const myLeads = leads;
+
+  const sectors = Array.from(
+    new Set(
+      myLeads
+        .map((lead) => (lead.setor || '').trim())
+        .filter(Boolean)
+    )
+  ).sort((a, b) => a.localeCompare(b, 'pt-BR'));
 
   const toggleSelectionMode = () => {
     setSelectionMode((prev) => !prev);
@@ -70,6 +79,7 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
         'Telefone Fixo': lead.telefoneFixo,
         Empresa: lead.nomeEmpresa,
         CNPJ: lead.cnpj,
+        Setor: lead.setor || '',
         LinkedIn: lead.linkedin,
         Etapa: lead.stage,
         Temperatura: lead.temperatura,
@@ -124,6 +134,7 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
     const phoneCel = findValue(['telefonecelular', 'celular', 'whatsapp', 'mobile', 'cel']);
     const phoneFixo = findValue(['telefonefixo', 'fixo', 'telefone', 'phone', 'tel']);
     const cnpj = findValue(['cnpj', 'cadastro', 'documento', 'cnpjdaempresa']).replace(/[^0-9]/g, '');
+    const setor = findValue(['setor', 'segmento', 'industria', 'industry', 'ramo', 'ramodeatividade', 'categoria']);
     const valorRaw = findValue(['valor', 'valorproposta', 'proposta', 'valordeal', 'dealvalue', 'value']);
     const valorProposta = valorRaw
       ? Number(valorRaw.replace(/[^0-9.,-]/g, '').replace(/\./g, '').replace(',', '.')) || 0
@@ -138,6 +149,7 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
       telefoneFixo: phoneFixo || '',
       nomeEmpresa: company || 'Empresa Não Identificada',
       cnpj: cnpj,
+      setor: setor,
       temperatura: 'frio' as const,
       stage: 'entrada' as const,
       valorProposta: valorProposta,
@@ -323,29 +335,51 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
           </div>
         </div>
 
-        <div className="relative">
-          <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`} />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Buscar lead por nome, empresa, email ou cargo..."
-            className={`w-full text-sm rounded-xl pl-10 pr-10 py-2.5 outline-none border transition-colors ${
-              theme === 'dark'
-                ? 'bg-slate-900 border-slate-700 text-slate-100 placeholder-slate-500 focus:border-indigo-500'
-                : 'bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400 focus:border-indigo-400'
-            }`}
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className={`absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-md transition-colors ${
-                theme === 'dark' ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_260px] gap-3">
+          <div className="relative">
+            <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Buscar lead por nome, empresa, email, cargo ou setor..."
+              className={`w-full text-sm rounded-xl pl-10 pr-10 py-2.5 outline-none border transition-colors ${
+                theme === 'dark'
+                  ? 'bg-slate-900 border-slate-700 text-slate-100 placeholder-slate-500 focus:border-indigo-500'
+                  : 'bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400 focus:border-indigo-400'
               }`}
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className={`absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-md transition-colors ${
+                  theme === 'dark' ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'
+                }`}
+                title="Limpar busca"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          <select
+            value={selectedSector}
+            onChange={(e) => setSelectedSector(e.target.value)}
+            className={`w-full text-sm rounded-xl px-3 py-2.5 outline-none border transition-colors ${
+              theme === 'dark'
+                ? 'bg-slate-900 border-slate-700 text-slate-100 focus:border-indigo-500'
+                : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-indigo-400'
+            }`}
+            aria-label="Filtrar por setor"
+          >
+            <option value="todos">Todos os setores</option>
+            {sectors.map((sector) => (
+              <option key={sector} value={sector}>
+                {sector}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -353,13 +387,23 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
         {columns.map(column => {
           const filteredLeads = myLeads.filter(l => {
             if (l.stage !== column.id) return false;
+
+            if (
+              selectedSector !== 'todos' &&
+              (l.setor || '').trim().toLowerCase() !== selectedSector.trim().toLowerCase()
+            ) {
+              return false;
+            }
+
             if (!searchQuery.trim()) return true;
+
             const q = searchQuery.toLowerCase().trim();
             return (
               l.nome.toLowerCase().includes(q) ||
               l.nomeEmpresa.toLowerCase().includes(q) ||
               l.emailCorporativo.toLowerCase().includes(q) ||
-              l.cargo.toLowerCase().includes(q)
+              l.cargo.toLowerCase().includes(q) ||
+              (l.setor || '').toLowerCase().includes(q)
             );
           });
           const isDragOver = dragOverColumn === column.id;
@@ -461,6 +505,17 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
                         )}
                       </div>
                       <div className="text-xs text-indigo-500 font-semibold mb-2 truncate pl-5">{lead.nomeEmpresa}</div>
+                      {lead.setor && (
+                        <div className="pl-5 mb-2">
+                          <span className={`inline-flex max-w-full truncate rounded-md border px-2 py-0.5 text-[10px] font-semibold ${
+                            theme === 'dark'
+                              ? 'border-slate-700 bg-slate-800/70 text-slate-300'
+                              : 'border-slate-200 bg-white text-slate-600'
+                          }`}>
+                            {lead.setor}
+                          </span>
+                        </div>
+                      )}
                       {lead.emailCorporativo && (
                         <div className="text-[11px] text-slate-400 truncate mb-1 pl-5">✉️ {lead.emailCorporativo}</div>
                       )}
