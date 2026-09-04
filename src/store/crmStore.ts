@@ -37,6 +37,7 @@ export interface Lead {
   telefoneFixo: string;
   nomeEmpresa: string;
   cnpj: string;
+  setor: string;
   linkedin: string;
   stage: Stage;
   temperatura: Temperature;
@@ -199,6 +200,7 @@ function mapLeadRow(row: any, activities: Activity[]): Lead {
     telefoneFixo: row.telefone_fixo ?? '',
     nomeEmpresa: row.nome_empresa ?? '',
     cnpj: row.cnpj ?? '',
+    setor: row.setor ?? '',
     linkedin: row.linkedin ?? '',
     stage: row.stage,
     temperatura: row.temperatura,
@@ -568,6 +570,7 @@ export const useCRMStore = create<CRMState>()((set, get) => {
         telefone_fixo: data.telefoneFixo,
         nome_empresa: data.nomeEmpresa,
         cnpj: data.cnpj,
+        setor: data.setor,
         linkedin: data.linkedin,
         stage: data.stage,
         temperatura: data.temperatura,
@@ -618,6 +621,7 @@ export const useCRMStore = create<CRMState>()((set, get) => {
       if (finalData.telefoneFixo !== undefined) payload.telefone_fixo = finalData.telefoneFixo;
       if (finalData.nomeEmpresa !== undefined) payload.nome_empresa = finalData.nomeEmpresa;
       if (finalData.cnpj !== undefined) payload.cnpj = finalData.cnpj;
+      if (finalData.setor !== undefined) payload.setor = finalData.setor;
       if (finalData.linkedin !== undefined) payload.linkedin = finalData.linkedin;
       if (finalData.stage !== undefined) payload.stage = finalData.stage;
       if (finalData.temperatura !== undefined) payload.temperatura = finalData.temperatura;
