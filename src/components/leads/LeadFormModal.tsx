@@ -20,6 +20,29 @@ interface CnpjSocio {
   cargo: string;
 }
 
+const SECTOR_SUGGESTIONS = [
+  'Tecnologia',
+  'Restaurante / Alimentação',
+  'Clínica / Saúde',
+  'Barbearia / Beleza',
+  'Advocacia / Jurídico',
+  'Indústria de Aço',
+  'Indústria de Plástico',
+  'Indústria Têxtil',
+  'Construção Civil',
+  'Comércio / Varejo',
+  'Atacado / Distribuição',
+  'Logística / Transportes',
+  'Automotivo',
+  'Educação',
+  'Imobiliário',
+  'Financeiro / Contabilidade',
+  'Marketing / Publicidade',
+  'Agronegócio',
+  'Hotelaria / Turismo',
+  'Serviços',
+];
+
 export function LeadFormModal({ leadId, onClose }: LeadFormModalProps) {
   const { t } = useTranslation();
   const leads = useCRMStore((s) => s.leads);
@@ -37,6 +60,7 @@ export function LeadFormModal({ leadId, onClose }: LeadFormModalProps) {
     telefoneFixo: '',
     nomeEmpresa: '',
     cnpj: '',
+    setor: '',
     temperatura: 'morno' as Temperature,
     stage: 'entrada' as Stage,
     valorProposta: '' as string | number,
@@ -59,6 +83,7 @@ export function LeadFormModal({ leadId, onClose }: LeadFormModalProps) {
         telefoneFixo: editingLead.telefoneFixo || '',
         nomeEmpresa: editingLead.nomeEmpresa || '',
         cnpj: editingLead.cnpj || '',
+        setor: editingLead.setor || '',
         temperatura: editingLead.temperatura || 'morno',
         stage: editingLead.stage || 'entrada',
         valorProposta: editingLead.valorProposta || '',
@@ -116,6 +141,7 @@ export function LeadFormModal({ leadId, onClose }: LeadFormModalProps) {
       telefoneFixo: form.telefoneFixo,
       nomeEmpresa: form.nomeEmpresa,
       cnpj: form.cnpj,
+      setor: form.setor.trim(),
       temperatura: form.temperatura,
       stage: form.stage,
       valorProposta: form.valorProposta ? Number(form.valorProposta) : 0,
@@ -138,6 +164,7 @@ export function LeadFormModal({ leadId, onClose }: LeadFormModalProps) {
     { key: 'telefoneCelular', label: t.lead.cellPhone, type: 'tel' },
     { key: 'telefoneFixo', label: t.lead.landline, type: 'tel' },
     { key: 'nomeEmpresa', label: t.lead.company, required: true, type: 'text' },
+    { key: 'setor', label: 'Setor / Segmento', type: 'text', placeholder: 'Ex.: Tecnologia, Restaurante, Clínica...' },
     { key: 'valorProposta', label: t.lead.proposalValue, type: 'number' },
   ];
 
@@ -174,10 +201,18 @@ export function LeadFormModal({ leadId, onClose }: LeadFormModalProps) {
                     type={field.type}
                     value={String(form[field.key as keyof typeof form])}
                     onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
+                    placeholder={'placeholder' in field ? field.placeholder : undefined}
+                    list={field.key === 'setor' ? 'setores-sugeridos' : undefined}
                     className="h-10"
                   />
                 </div>
               ))}
+
+              <datalist id="setores-sugeridos">
+                {SECTOR_SUGGESTIONS.map((setor) => (
+                  <option key={setor} value={setor} />
+                ))}
+              </datalist>
 
               {/* CNPJ + busca automática */}
               <div className="space-y-1.5 sm:col-span-2">
