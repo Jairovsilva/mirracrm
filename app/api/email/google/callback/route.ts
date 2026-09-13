@@ -160,7 +160,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // Troca o authorization code por tokens diretamente com o Google.
+    // Troca o authorization code pelos tokens diretamente com o Google.
     const tokenResponse = await fetch(
       'https://oauth2.googleapis.com/token',
       {
@@ -194,18 +194,17 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    /*
+     * O access token existe apenas durante esta execução.
+     * Ele NÃO será persistido no banco.
+     */
     const accessToken = String(tokenData.access_token);
+
     const refreshToken = tokenData.refresh_token
       ? String(tokenData.refresh_token)
       : null;
 
-    /*
-     * Com gmail.send não precisamos solicitar permissão para ler
-     * mensagens. Para identificar a própria conta conectada,
-     * usamos users.getProfile com userId=me.
-     */
-       // Identifica a Conta Google conectada sem solicitar
-    // permissão para ler a caixa de entrada do Gmail.
+    // Identifica a Conta Google sem solicitar leitura da caixa de entrada.
     const profileResponse = await fetch(
       'https://www.googleapis.com/oauth2/v2/userinfo',
       {
@@ -247,9 +246,8 @@ export async function GET(req: NextRequest) {
     );
 
     /*
-     * Não confiamos apenas no userId contido no state.
-     * Confirmamos que o perfil continua existindo e que o scope_key
-     * continua sendo o mesmo que iniciou o OAuth.
+     * Confirma que o usuário continua existindo e que pertence
+     * ao mesmo scope_key que iniciou o OAuth.
      */
     const { data: userProfile, error: userProfileError } =
       await adminClient
@@ -275,32 +273,48 @@ export async function GET(req: NextRequest) {
     }
 
     /*
-     * Um usuário possui uma conexão Google ativa.
-     * O unique(user_id, provider) criado no banco garante isso.
+     * Localiza uma conexão Google já existente para o usuário.
      */
-    const { data: existingAccount } = await adminClient
+    const {
+      data: existingAccount,
+      error: existingAccountError,
+    } = await adminClient
       .from('email_accounts')
       .select('id')
       .eq('user_id', statePayload.userId)
       .eq('provider', 'google')
       .maybeSingle();
 
+    if (existingAccountError) {
+      console.error(
+        'Erro ao consultar email_accounts:',
+        existingAccountError
+      );
+
+      return redirectToApp(req, {
+        email_connection: 'error',
+        reason: 'account_lookup',
+      });
+    }
+
     let emailAccountId: string;
 
     if (existingAccount?.id) {
-      const { data: updatedAccount, error: updateAccountError } =
-        await adminClient
-          .from('email_accounts')
-          .update({
-            scope_key: statePayload.scopeKey,
-            email_address: emailAddress,
-            status: 'active',
-            last_error: null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', existingAccount.id)
-          .select('id')
-          .single();
+      const {
+        data: updatedAccount,
+        error: updateAccountError,
+      } = await adminClient
+        .from('email_accounts')
+        .update({
+          scope_key: statePayload.scopeKey,
+          email_address: emailAddress,
+          status: 'active',
+          last_error: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existingAccount.id)
+        .select('id')
+        .single();
 
       if (updateAccountError || !updatedAccount) {
         console.error(
@@ -316,18 +330,20 @@ export async function GET(req: NextRequest) {
 
       emailAccountId = updatedAccount.id;
     } else {
-      const { data: insertedAccount, error: insertAccountError } =
-        await adminClient
-          .from('email_accounts')
-          .insert({
-            user_id: statePayload.userId,
-            scope_key: statePayload.scopeKey,
-            provider: 'google',
-            email_address: emailAddress,
-            status: 'active',
-          })
-          .select('id')
-          .single();
+      const {
+        data: insertedAccount,
+        error: insertAccountError,
+      } = await adminClient
+        .from('email_accounts')
+        .insert({
+          user_id: statePayload.userId,
+          scope_key: statePayload.scopeKey,
+          provider: 'google',
+          email_address: emailAddress,
+          status: 'active',
+        })
+        .select('id')
+        .single();
 
       if (insertAccountError || !insertedAccount) {
         console.error(
@@ -345,21 +361,131 @@ export async function GET(req: NextRequest) {
     }
 
     /*
-     * Se for uma reconexão, o Google pode não devolver um novo
-     * refresh_token. Nesse caso preservamos o refresh_token já salvo.
+     * Busca somente a referência UUID do refresh token.
+     *
+     * O token real fica no Supabase Vault.
      */
-    const { data: existingCredentials } = await adminClient
+    const {
+      data: existingCredentials,
+      error: existingCredentialsError,
+    } = await adminClient
       .from('email_oauth_credentials')
-      .select('refresh_token')
+      .select('id, refresh_token_secret_id')
       .eq('email_account_id', emailAccountId)
       .maybeSingle();
 
-    const finalRefreshToken =
-      refreshToken || existingCredentials?.refresh_token || null;
-
-    if (!finalRefreshToken) {
+    if (existingCredentialsError) {
       console.error(
-        'Google não forneceu refresh_token e não existe token anterior.'
+        'Erro ao consultar credenciais OAuth:',
+        existingCredentialsError
+      );
+
+      await adminClient
+        .from('email_accounts')
+        .update({
+          status: 'error',
+          last_error:
+            'Não foi possível consultar as credenciais OAuth.',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', emailAccountId);
+
+      return redirectToApp(req, {
+        email_connection: 'error',
+        reason: 'credential_lookup',
+      });
+    }
+
+    let refreshTokenSecretId:
+      | string
+      | null = existingCredentials?.refresh_token_secret_id || null;
+
+    /*
+     * Se o Google enviou um novo refresh token:
+     *
+     * - se já existe secret no Vault, atualizamos;
+     * - se ainda não existe, criamos um secret novo.
+     */
+    if (refreshToken) {
+      if (refreshTokenSecretId) {
+        const { error: updateSecretError } =
+          await adminClient.rpc(
+            'update_email_refresh_token',
+            {
+              p_secret_id: refreshTokenSecretId,
+              p_refresh_token: refreshToken,
+              p_email_account_id: emailAccountId,
+            }
+          );
+
+        if (updateSecretError) {
+          console.error(
+            'Erro ao atualizar refresh token no Vault:',
+            updateSecretError
+          );
+
+          await adminClient
+            .from('email_accounts')
+            .update({
+              status: 'error',
+              last_error:
+                'Não foi possível atualizar a autorização segura do Google.',
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', emailAccountId);
+
+          return redirectToApp(req, {
+            email_connection: 'error',
+            reason: 'vault_update',
+          });
+        }
+      } else {
+        const {
+          data: createdSecretId,
+          error: createSecretError,
+        } = await adminClient.rpc(
+          'store_email_refresh_token',
+          {
+            p_refresh_token: refreshToken,
+            p_email_account_id: emailAccountId,
+          }
+        );
+
+        if (createSecretError || !createdSecretId) {
+          console.error(
+            'Erro ao salvar refresh token no Vault:',
+            createSecretError
+          );
+
+          await adminClient
+            .from('email_accounts')
+            .update({
+              status: 'error',
+              last_error:
+                'Não foi possível armazenar a autorização segura do Google.',
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', emailAccountId);
+
+          return redirectToApp(req, {
+            email_connection: 'error',
+            reason: 'vault_create',
+          });
+        }
+
+        refreshTokenSecretId = String(createdSecretId);
+      }
+    }
+
+    /*
+     * Em uma reconexão o Google pode não fornecer outro refresh_token.
+     *
+     * Isso é aceitável somente se já existir uma referência válida
+     * para um refresh token no Vault.
+     */
+    if (!refreshTokenSecretId) {
+      console.error(
+        'Google não forneceu refresh_token e não existe secret anterior.'
       );
 
       await adminClient
@@ -384,20 +510,42 @@ export async function GET(req: NextRequest) {
       Date.now() + expiresIn * 1000
     ).toISOString();
 
-    const { error: credentialError } = await adminClient
+    /*
+     * IMPORTANTE:
+     *
+     * access_token = null
+     * refresh_token = null
+     *
+     * Nenhuma credencial Google fica armazenada em texto puro.
+     *
+     * Guardamos somente:
+     * - referência UUID do Vault
+     * - tipo do token
+     * - scopes
+     * - informação de expiração do access token recebido nesta conexão
+     */
+    const {
+      error: credentialSaveError,
+    } = await adminClient
       .from('email_oauth_credentials')
       .upsert(
         {
           email_account_id: emailAccountId,
-          access_token: accessToken,
-          refresh_token: finalRefreshToken,
+
+          access_token: null,
+          refresh_token: null,
+
+          refresh_token_secret_id: refreshTokenSecretId,
+
           token_type: tokenData.token_type
             ? String(tokenData.token_type)
             : 'Bearer',
+
           scope: tokenData.scope
             ? String(tokenData.scope)
             : process.env.GOOGLE_EMAIL_SCOPE ||
-              'https://www.googleapis.com/auth/gmail.send',
+              'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/userinfo.email',
+
           expires_at: expiresAt,
           updated_at: new Date().toISOString(),
         },
@@ -406,10 +554,10 @@ export async function GET(req: NextRequest) {
         }
       );
 
-    if (credentialError) {
+    if (credentialSaveError) {
       console.error(
-        'Erro ao salvar credenciais OAuth:',
-        credentialError
+        'Erro ao salvar referência das credenciais OAuth:',
+        credentialSaveError
       );
 
       await adminClient
@@ -417,7 +565,7 @@ export async function GET(req: NextRequest) {
         .update({
           status: 'error',
           last_error:
-            'Não foi possível armazenar as credenciais OAuth.',
+            'Não foi possível registrar as credenciais OAuth.',
           updated_at: new Date().toISOString(),
         })
         .eq('id', emailAccountId);
@@ -441,7 +589,10 @@ export async function GET(req: NextRequest) {
       email_connection: 'success',
     });
   } catch (err: any) {
-    console.error('Erro inesperado no callback Google OAuth:', err);
+    console.error(
+      'Erro inesperado no callback Google OAuth:',
+      err
+    );
 
     return redirectToApp(req, {
       email_connection: 'error',
