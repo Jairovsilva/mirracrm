@@ -204,8 +204,10 @@ export async function GET(req: NextRequest) {
      * mensagens. Para identificar a própria conta conectada,
      * usamos users.getProfile com userId=me.
      */
+       // Identifica a Conta Google conectada sem solicitar
+    // permissão para ler a caixa de entrada do Gmail.
     const profileResponse = await fetch(
-      'https://gmail.googleapis.com/gmail/v1/users/me/profile',
+      'https://www.googleapis.com/oauth2/v2/userinfo',
       {
         method: 'GET',
         headers: {
@@ -215,21 +217,21 @@ export async function GET(req: NextRequest) {
       }
     );
 
-    const gmailProfile = await profileResponse.json();
+    const googleProfile = await profileResponse.json();
 
-    if (!profileResponse.ok || !gmailProfile?.emailAddress) {
-      console.error('Falha ao identificar conta Gmail:', {
+    if (!profileResponse.ok || !googleProfile?.email) {
+      console.error('Falha ao identificar Conta Google:', {
         status: profileResponse.status,
-        error: gmailProfile?.error,
+        error: googleProfile?.error,
       });
 
       return redirectToApp(req, {
         email_connection: 'error',
-        reason: 'gmail_profile',
+        reason: 'google_profile',
       });
     }
 
-    const emailAddress = String(gmailProfile.emailAddress)
+    const emailAddress = String(googleProfile.email)
       .trim()
       .toLowerCase();
 
