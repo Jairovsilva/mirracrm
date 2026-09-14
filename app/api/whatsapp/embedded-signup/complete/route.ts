@@ -1,7 +1,4 @@
-import {
-  NextRequest,
-  NextResponse,
-} from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 import {
   getAdminSupabase,
@@ -16,17 +13,19 @@ interface CompleteEmbeddedSignupBody {
   phoneNumberId?: string;
 }
 
+interface MetaError {
+  message?: string;
+  type?: string;
+  code?: number;
+  error_subcode?: number;
+  fbtrace_id?: string;
+}
+
 interface MetaTokenResponse {
   access_token?: string;
   token_type?: string;
   expires_in?: number;
-  error?: {
-    message?: string;
-    type?: string;
-    code?: number;
-    error_subcode?: number;
-    fbtrace_id?: string;
-  };
+  error?: MetaError;
 }
 
 interface MetaPhoneNumber {
@@ -40,116 +39,71 @@ interface MetaPhoneNumbersResponse {
   paging?: {
     next?: string;
   };
-  error?: {
-    message?: string;
-    type?: string;
-    code?: number;
-    error_subcode?: number;
-    fbtrace_id?: string;
-  };
+  error?: MetaError;
 }
 
-function normalizeMetaId(
-  value: unknown
-): string {
+interface MetaSubscribedAppsResponse {
+  success?: boolean;
+  error?: MetaError;
+}
+
+function normalizeMetaId(value: unknown): string {
   return String(value || '').trim();
 }
 
 function getGraphVersion(): string {
-  return (
-    process.env
-      .WHATSAPP_GRAPH_API_VERSION ||
-    'v23.0'
-  );
+  return process.env.WHATSAPP_GRAPH_API_VERSION || 'v23.0';
 }
 
-async function exchangeCodeForToken(
-  code: string
-): Promise<string> {
-  const appId =
-    process.env
-      .NEXT_PUBLIC_META_APP_ID;
-
-  const appSecret =
-    process.env
-      .WHATSAPP_APP_SECRET;
+/**
+ * Troca o authorization code temporário retornado
+ * pelo Embedded Signup por um access token.
+ *
+ * Todo esse processo acontece no servidor.
+ * O token nunca é devolvido ao navegador.
+ */
+async function exchangeCodeForToken(code: string): Promise<string> {
+  const appId = process.env.NEXT_PUBLIC_META_APP_ID;
+  const appSecret = process.env.WHATSAPP_APP_SECRET;
 
   if (!appId) {
     throw new Error(
-      'NEXT_PUBLIC_META_APP_ID não configurado.'
+      'NEXT_PUBLIC_META_APP_ID não configurado no servidor.'
     );
   }
 
   if (!appSecret) {
     throw new Error(
-      'WHATSAPP_APP_SECRET não configurado.'
+      'WHATSAPP_APP_SECRET não configurado no servidor.'
     );
   }
 
-  const graphVersion =
-    getGraphVersion();
+  const graphVersion = getGraphVersion();
 
-  const url =
-    new URL(
-      `https://graph.facebook.com/${graphVersion}/oauth/access_token`
-    );
-
-  url.searchParams.set(
-    'client_id',
-    appId
+  const url = new URL(
+    `https://graph.facebook.com/${graphVersion}/oauth/access_token`
   );
 
-  url.searchParams.set(
-    'client_secret',
-    appSecret
-  );
+  url.searchParams.set('client_id', appId);
+  url.searchParams.set('client_secret', appSecret);
+  url.searchParams.set('code', code);
 
-  url.searchParams.set(
-    'code',
-    code
-  );
+  const response = await fetch(url.toString(), {
+    method: 'GET',
+    cache: 'no-store',
+  });
 
-  const response =
-    await fetch(
-      url.toString(),
-      {
-        method: 'GET',
-        cache: 'no-store',
-      }
-    );
+  const data = (await response.json()) as MetaTokenResponse;
 
-  const data =
-    (await response.json()) as
-      MetaTokenResponse;
-
-  if (
-    !response.ok ||
-    !data.access_token
-  ) {
-    console.error(
-      'Falha ao trocar code do Embedded Signup:',
-      {
-        status:
-          response.status,
-
-        metaCode:
-          data?.error?.code,
-
-        metaSubcode:
-          data?.error
-            ?.error_subcode,
-
-        metaType:
-          data?.error?.type,
-
-        metaMessage:
-          data?.error?.message,
-
-        fbtraceId:
-          data?.error
-            ?.fbtrace_id,
-      }
-    );
+  if (!response.ok || !data.access_token) {
+    console.error('Falha ao trocar code do Embedded Signup:', {
+      status: response.status,
+      metaCode: data?.error?.code,
+      metaSubcode: data?.error?.error_subcode,
+      metaType: data?.error?.type,
+      metaMessage: data?.error?.message,
+      fbtraceId: data?.error?.fbtrace_id,
+    });
 
     throw new Error(
       data?.error?.message ||
@@ -160,69 +114,45 @@ async function exchangeCodeForToken(
   return data.access_token;
 }
 
+/**
+ * Consulta os números pertencentes à WABA autorizada.
+ *
+ * Fazemos isso no backend para não confiar apenas
+ * no wabaId/phoneNumberId enviados pelo frontend.
+ */
 async function getAllWabaPhoneNumbers(
   accessToken: string,
   wabaId: string
 ): Promise<MetaPhoneNumber[]> {
-  const graphVersion =
-    getGraphVersion();
+  const graphVersion = getGraphVersion();
 
-  let nextUrl:
-    | string
-    | null =
-    `https://graph.facebook.com/${graphVersion}/${encodeURIComponent(
-      wabaId
-    )}/phone_numbers?fields=id,display_phone_number,verified_name&limit=100`;
+  let nextUrl: string | null =
+    `https://graph.facebook.com/${graphVersion}/` +
+    `${encodeURIComponent(wabaId)}/phone_numbers` +
+    '?fields=id,display_phone_number,verified_name&limit=100';
 
-  const result:
-    MetaPhoneNumber[] = [];
+  const result: MetaPhoneNumber[] = [];
 
   while (nextUrl) {
-    const response =
-      await fetch(
-        nextUrl,
-        {
-          method: 'GET',
+    const response = await fetch(nextUrl, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      cache: 'no-store',
+    });
 
-          headers: {
-            Authorization:
-              `Bearer ${accessToken}`,
-          },
-
-          cache: 'no-store',
-        }
-      );
-
-    const data =
-      (await response.json()) as
-        MetaPhoneNumbersResponse;
+    const data = (await response.json()) as MetaPhoneNumbersResponse;
 
     if (!response.ok) {
-      console.error(
-        'Falha ao consultar números da WABA:',
-        {
-          status:
-            response.status,
-
-          metaCode:
-            data?.error?.code,
-
-          metaSubcode:
-            data?.error
-              ?.error_subcode,
-
-          metaType:
-            data?.error?.type,
-
-          metaMessage:
-            data?.error
-              ?.message,
-
-          fbtraceId:
-            data?.error
-              ?.fbtrace_id,
-        }
-      );
+      console.error('Falha ao consultar números da WABA:', {
+        status: response.status,
+        metaCode: data?.error?.code,
+        metaSubcode: data?.error?.error_subcode,
+        metaType: data?.error?.type,
+        metaMessage: data?.error?.message,
+        fbtraceId: data?.error?.fbtrace_id,
+      });
 
       throw new Error(
         data?.error?.message ||
@@ -230,77 +160,49 @@ async function getAllWabaPhoneNumbers(
       );
     }
 
-    if (
-      Array.isArray(data.data)
-    ) {
-      result.push(
-        ...data.data
-      );
+    if (Array.isArray(data.data)) {
+      result.push(...data.data);
     }
 
-    nextUrl =
-      data?.paging?.next ||
-      null;
+    nextUrl = data?.paging?.next || null;
   }
 
   return result;
 }
 
+/**
+ * Assina o aplicativo na WABA autorizada para
+ * que os webhooks possam ser entregues ao MirraCRM.
+ */
 async function subscribeAppToWaba(
   accessToken: string,
   wabaId: string
 ): Promise<void> {
-  const graphVersion =
-    getGraphVersion();
+  const graphVersion = getGraphVersion();
 
-  const response =
-    await fetch(
-      `https://graph.facebook.com/${graphVersion}/${encodeURIComponent(
-        wabaId
-      )}/subscribed_apps`,
-      {
-        method: 'POST',
+  const response = await fetch(
+    `https://graph.facebook.com/${graphVersion}/` +
+      `${encodeURIComponent(wabaId)}/subscribed_apps`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      cache: 'no-store',
+    }
+  );
 
-        headers: {
-          Authorization:
-            `Bearer ${accessToken}`,
-        },
+  const data = (await response.json()) as MetaSubscribedAppsResponse;
 
-        cache: 'no-store',
-      }
-    );
-
-  const data =
-    await response.json();
-
-  if (
-    !response.ok ||
-    data?.success !== true
-  ) {
-    console.error(
-      'Falha ao assinar WABA para webhooks:',
-      {
-        status:
-          response.status,
-
-        metaCode:
-          data?.error?.code,
-
-        metaSubcode:
-          data?.error
-            ?.error_subcode,
-
-        metaType:
-          data?.error?.type,
-
-        metaMessage:
-          data?.error?.message,
-
-        fbtraceId:
-          data?.error
-            ?.fbtrace_id,
-      }
-    );
+  if (!response.ok || data?.success !== true) {
+    console.error('Falha ao assinar WABA para webhooks:', {
+      status: response.status,
+      metaCode: data?.error?.code,
+      metaSubcode: data?.error?.error_subcode,
+      metaType: data?.error?.type,
+      metaMessage: data?.error?.message,
+      fbtraceId: data?.error?.fbtrace_id,
+    });
 
     throw new Error(
       data?.error?.message ||
@@ -309,37 +211,32 @@ async function subscribeAppToWaba(
   }
 }
 
-export async function POST(
-  request: NextRequest
-) {
+export async function POST(request: NextRequest) {
   try {
-    /*
+    /**
      * 1. Autenticar usuário do MirraCRM.
      */
-    const requester =
-  await getRequesterContext(
-    request
-  );
+    const requester = await getRequesterContext(request);
 
-if (!requester) {
-  return NextResponse.json(
-    {
-      ok: false,
-      error:
-        'Usuário não autenticado.',
-    },
-    {
-      status: 401,
+    if (!requester) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'Usuário não autenticado.',
+        },
+        {
+          status: 401,
+        }
+      );
     }
-  );
-}
 
-if (
-  requester.role !==
-    'owner' &&
-  requester.role !==
-    'admin'
-) {
+    /**
+     * Somente owner/admin pode conectar
+     * uma conta WhatsApp ao tenant.
+     */
+    if (
+      requester.role !== 'owner' &&
+      requester.role !== 'admin'
     ) {
       return NextResponse.json(
         {
@@ -353,34 +250,30 @@ if (
       );
     }
 
-    /*
-     * 2. Receber resultado do
-     * Embedded Signup.
+    /**
+     * 2. Receber o resultado do Embedded Signup.
      */
-    const body =
-      (await request.json()) as
-        CompleteEmbeddedSignupBody;
+    let body: CompleteEmbeddedSignupBody;
 
-    const code =
-      String(
-        body?.code || ''
-      ).trim();
-
-    const wabaId =
-      normalizeMetaId(
-        body?.wabaId
+    try {
+      body = (await request.json()) as CompleteEmbeddedSignupBody;
+    } catch {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'Corpo da requisição inválido.',
+        },
+        {
+          status: 400,
+        }
       );
+    }
 
-    const phoneNumberId =
-      normalizeMetaId(
-        body?.phoneNumberId
-      );
+    const code = String(body?.code || '').trim();
+    const wabaId = normalizeMetaId(body?.wabaId);
+    const phoneNumberId = normalizeMetaId(body?.phoneNumberId);
 
-    if (
-      !code ||
-      !wabaId ||
-      !phoneNumberId
-    ) {
+    if (!code || !wabaId || !phoneNumberId) {
       return NextResponse.json(
         {
           ok: false,
@@ -393,38 +286,24 @@ if (
       );
     }
 
-    /*
-     * 3. Trocar o code temporário
-     * pelo access token.
-     *
-     * O token nunca retorna ao
-     * navegador.
+    /**
+     * 3. Trocar o authorization code temporário
+     * por access token no servidor.
      */
-    const accessToken =
-      await exchangeCodeForToken(
-        code
-      );
+    const accessToken = await exchangeCodeForToken(code);
 
-    /*
-     * 4. Validar que o número
-     * realmente pertence à WABA
-     * autorizada.
-     *
-     * Não confiamos apenas nos IDs
-     * enviados pelo frontend.
+    /**
+     * 4. Validar que o phone_number_id realmente
+     * pertence à WABA autorizada.
      */
-    const phoneNumbers =
-      await getAllWabaPhoneNumbers(
-        accessToken,
-        wabaId
-      );
+    const phoneNumbers = await getAllWabaPhoneNumbers(
+      accessToken,
+      wabaId
+    );
 
-    const selectedPhone =
-      phoneNumbers.find(
-        (phone) =>
-          String(phone?.id) ===
-          phoneNumberId
-      );
+    const selectedPhone = phoneNumbers.find(
+      (phone) => String(phone?.id || '') === phoneNumberId
+    );
 
     if (!selectedPhone) {
       return NextResponse.json(
@@ -439,44 +318,26 @@ if (
       );
     }
 
-    /*
-     * 5. Assinar o aplicativo
-     * nesta WABA para permitir
-     * recebimento dos webhooks.
+    /**
+     * 5. Assinar o aplicativo na WABA.
      */
-    await subscribeAppToWaba(
-      accessToken,
-      wabaId
-    );
+    await subscribeAppToWaba(accessToken, wabaId);
 
-    const admin =
-      getAdminSupabase();
+    const admin = getAdminSupabase();
 
-    /*
-     * 6. Verificar se este número
-     * já existe no MirraCRM.
+    /**
+     * 6. Verificar se o phone_number_id já existe.
      */
     const {
-      data:
-        existingAccount,
-      error:
-        existingAccountError,
+      data: existingAccount,
+      error: existingAccountError,
     } = await admin
-      .from(
-        'whatsapp_accounts'
-      )
-      .select(
-        'id, scope_key, access_token_secret_id'
-      )
-      .eq(
-        'phone_number_id',
-        phoneNumberId
-      )
+      .from('whatsapp_accounts')
+      .select('id, scope_key, access_token_secret_id')
+      .eq('phone_number_id', phoneNumberId)
       .maybeSingle();
 
-    if (
-      existingAccountError
-    ) {
+    if (existingAccountError) {
       console.error(
         'Erro ao consultar whatsapp_accounts:',
         existingAccountError
@@ -487,15 +348,13 @@ if (
       );
     }
 
-    /*
-     * Um mesmo phone_number_id não
-     * pode ser apropriado por outro
-     * tenant/scope.
+    /**
+     * Impede que um número já associado a outro
+     * tenant/scope seja apropriado pelo tenant atual.
      */
     if (
       existingAccount &&
-      existingAccount.scope_key !==
-        requester.scopeKey
+      existingAccount.scope_key !== requester.scopeKey
     ) {
       return NextResponse.json(
         {
@@ -509,42 +368,27 @@ if (
       );
     }
 
-    /*
-     * 7. Guardar token no Vault.
+    /**
+     * 7. Guardar o access token no Supabase Vault.
      *
-     * Se já houver segredo para este
-     * número, atualizamos o segredo.
-     * Caso contrário, criamos um novo.
+     * whatsapp_accounts recebe somente o UUID
+     * do segredo, nunca o token em texto puro.
      */
-    let accessTokenSecretId:
-      | string
-      | null =
-      existingAccount
-        ?.access_token_secret_id ||
-      null;
+    let accessTokenSecretId: string | null =
+      existingAccount?.access_token_secret_id || null;
 
-    if (
-      accessTokenSecretId
-    ) {
-      const {
-        error:
-          updateSecretError,
-      } = await admin.rpc(
+    if (accessTokenSecretId) {
+      const { error: updateSecretError } = await admin.rpc(
         'update_whatsapp_access_token',
         {
-          p_secret_id:
-            accessTokenSecretId,
-
-          p_access_token:
-            accessToken,
+          p_secret_id: accessTokenSecretId,
+          p_access_token: accessToken,
         }
       );
 
-      if (
-        updateSecretError
-      ) {
+      if (updateSecretError) {
         console.error(
-          'Erro ao atualizar token no Vault:',
+          'Erro ao atualizar token do WhatsApp no Vault:',
           updateSecretError
         );
 
@@ -554,24 +398,15 @@ if (
       }
     } else {
       const {
-        data:
-          createdSecretId,
-        error:
-          createSecretError,
-      } = await admin.rpc(
-        'store_whatsapp_access_token',
-        {
-          p_access_token:
-            accessToken,
-        }
-      );
+        data: createdSecretId,
+        error: createSecretError,
+      } = await admin.rpc('store_whatsapp_access_token', {
+        p_access_token: accessToken,
+      });
 
-      if (
-        createSecretError ||
-        !createdSecretId
-      ) {
+      if (createSecretError || !createdSecretId) {
         console.error(
-          'Erro ao armazenar token no Vault:',
+          'Erro ao armazenar token do WhatsApp no Vault:',
           createSecretError
         );
 
@@ -580,73 +415,47 @@ if (
         );
       }
 
-      accessTokenSecretId =
-        String(
-          createdSecretId
-        );
+      accessTokenSecretId = String(createdSecretId);
     }
 
-    /*
-     * 8. Criar/atualizar a conta.
+    /**
+     * 8. Criar/atualizar a conta WhatsApp.
      */
     const accountPayload = {
-      scope_key:
-        requester.scopeKey,
-
-      waba_id:
-        wabaId,
-
-      phone_number_id:
-        phoneNumberId,
-
+      scope_key: requester.scopeKey,
+      waba_id: wabaId,
+      phone_number_id: phoneNumberId,
       display_phone_number:
-        selectedPhone
-          .display_phone_number ||
-        null,
-
-      verified_name:
-        selectedPhone
-          .verified_name ||
-        null,
-
-      status:
-        'active',
-
-      created_by_user_id:
-        requester.userId,
-
-      access_token_secret_id:
-        accessTokenSecretId,
-
-      updated_at:
-        new Date().toISOString(),
+        selectedPhone.display_phone_number || null,
+      verified_name: selectedPhone.verified_name || null,
+      status: 'active',
+      created_by_user_id: requester.userId,
+      access_token_secret_id: accessTokenSecretId,
+      updated_at: new Date().toISOString(),
     };
 
     const {
-      data:
-        savedAccount,
-      error:
-        saveAccountError,
+      data: savedAccount,
+      error: saveAccountError,
     } = await admin
-      .from(
-        'whatsapp_accounts'
-      )
-      .upsert(
-        accountPayload,
-        {
-          onConflict:
-            'phone_number_id',
-        }
-      )
+      .from('whatsapp_accounts')
+      .upsert(accountPayload, {
+        onConflict: 'phone_number_id',
+      })
       .select(
-        'id, scope_key, waba_id, phone_number_id, display_phone_number, verified_name, status'
+        [
+          'id',
+          'scope_key',
+          'waba_id',
+          'phone_number_id',
+          'display_phone_number',
+          'verified_name',
+          'status',
+        ].join(',')
       )
       .single();
 
-    if (
-      saveAccountError ||
-      !savedAccount
-    ) {
+    if (saveAccountError || !savedAccount) {
       console.error(
         'Erro ao salvar conta WhatsApp:',
         saveAccountError
@@ -657,81 +466,58 @@ if (
       );
     }
 
-    /*
-     * 9. Somente após salvar a nova
-     * conta com sucesso, desativamos
-     * outras contas WhatsApp que
-     * estavam ativas neste scope.
+    /**
+     * 9. Depois que a nova conta estiver salva,
+     * desativar outras contas ativas do mesmo scope.
      *
-     * Isso evita o .maybeSingle()
-     * do frontend encontrar duas
-     * contas ativas.
+     * Assim mantemos somente uma integração ativa
+     * por tenant e preservamos o comportamento atual
+     * do WhatsAppView.
      */
-    const {
-      error:
-        deactivateError,
-    } = await admin
-      .from(
-        'whatsapp_accounts'
-      )
+    const { error: deactivateError } = await admin
+      .from('whatsapp_accounts')
       .update({
-        status:
-          'inactive',
-
-        updated_at:
-          new Date().toISOString(),
+        status: 'inactive',
+        updated_at: new Date().toISOString(),
       })
-      .eq(
-        'scope_key',
-        requester.scopeKey
-      )
-      .neq(
-        'id',
-        savedAccount.id
-      )
-      .eq(
-        'status',
-        'active'
-      );
+      .eq('scope_key', requester.scopeKey)
+      .neq('id', savedAccount.id)
+      .eq('status', 'active');
 
-    if (
-      deactivateError
-    ) {
+    if (deactivateError) {
       console.error(
         'Erro ao desativar contas WhatsApp anteriores:',
         deactivateError
       );
 
-      /*
-       * Não desfazemos uma autorização
-       * Meta válida por causa disso.
-       * Porém retornamos erro para que
-       * não escondamos inconsistência.
-       */
       throw new Error(
         'O novo número foi conectado, mas houve erro ao desativar a configuração anterior.'
       );
     }
 
+    /**
+     * Nunca retornar access token ou secret ID
+     * ao navegador.
+     */
     return NextResponse.json({
       ok: true,
-
-      account:
-        savedAccount,
+      account: savedAccount,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error(
       'Erro ao concluir Embedded Signup:',
       error
     );
 
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Não foi possível concluir a conexão do WhatsApp.';
+
     return NextResponse.json(
       {
         ok: false,
-
-        error:
-          error?.message ||
-          'Não foi possível concluir a conexão do WhatsApp.',
+        error: message,
       },
       {
         status: 500,
