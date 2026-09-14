@@ -14,6 +14,375 @@ import {
 
 export const runtime = 'nodejs';
 
+function getMessageTimestamp(
+  message: any
+): string {
+  const timestamp =
+    Number(message?.timestamp);
+
+  if (
+    Number.isFinite(timestamp) &&
+    timestamp > 0
+  ) {
+    return new Date(
+      timestamp * 1000
+    ).toISOString();
+  }
+
+  return new Date().toISOString();
+}
+
+async function findOrCreateConversationForEcho(
+  admin: any,
+  account: any,
+  customerPhone: string,
+  sentAt: string
+) {
+  const {
+    data: existingConversation,
+  } = await admin
+    .from('whatsapp_conversations')
+    .select('*')
+    .eq(
+      'whatsapp_account_id',
+      account.id
+    )
+    .eq(
+      'phone_number',
+      customerPhone
+    )
+    .maybeSingle();
+
+  if (existingConversation) {
+    return existingConversation;
+  }
+
+  /*
+   * Primeiro tentamos localizar um Lead
+   * existente pelo telefone.
+   *
+   * Uma mensagem enviada pelo Business App
+   * não deve criar automaticamente um Lead
+   * novo, pois pode ser apenas uma conversa
+   * iniciada manualmente no celular.
+   */
+  const {
+    data: lead,
+  } = await admin
+    .from('leads')
+    .select('*')
+    .eq(
+      'scope_key',
+      account.scope_key
+    )
+    .eq(
+      'whatsapp_phone_normalized',
+      customerPhone
+    )
+    .maybeSingle();
+
+  let assignedUserId:
+    | string
+    | null =
+    lead?.created_by_user_id ||
+    null;
+
+  if (!assignedUserId) {
+    const {
+      data: fallbackUser,
+    } = await admin
+      .from('profiles')
+      .select('id,role')
+      .eq(
+        'scope_key',
+        account.scope_key
+      )
+      .in(
+        'role',
+        [
+          'owner',
+          'admin',
+        ]
+      )
+      .order(
+        'created_at',
+        {
+          ascending: true,
+        }
+      )
+      .limit(1)
+      .maybeSingle();
+
+    assignedUserId =
+      fallbackUser?.id || null;
+  }
+
+  if (!assignedUserId) {
+    console.error(
+      'Nenhum usuário disponível para criar conversa de echo.'
+    );
+
+    return null;
+  }
+
+  const {
+    data: createdConversation,
+    error,
+  } = await admin
+    .from('whatsapp_conversations')
+    .insert({
+      scope_key:
+        account.scope_key,
+
+      whatsapp_account_id:
+        account.id,
+
+      lead_id:
+        lead?.id || null,
+
+      phone_number:
+        customerPhone,
+
+      contact_name:
+        lead?.nome ||
+        customerPhone,
+
+      assigned_user_id:
+        assignedUserId,
+
+      status:
+        'open',
+
+      unread_count:
+        0,
+
+      last_message_at:
+        sentAt,
+
+      created_at:
+        sentAt,
+
+      updated_at:
+        sentAt,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error(
+      'Erro ao criar conversa para smb_message_echoes:',
+      error
+    );
+
+    return null;
+  }
+
+  return createdConversation;
+}
+
+async function processBusinessAppEcho(
+  value: any,
+  echo: any
+) {
+  const phoneNumberId =
+    String(
+      value?.metadata
+        ?.phone_number_id ||
+      ''
+    );
+
+  if (!phoneNumberId) {
+    console.error(
+      'smb_message_echoes sem phone_number_id.'
+    );
+
+    return;
+  }
+
+  const account =
+    await getWhatsAppAccountByPhoneNumberId(
+      phoneNumberId
+    );
+
+  if (!account) {
+    console.error(
+      'smb_message_echoes recebido para phone_number_id não cadastrado:',
+      phoneNumberId
+    );
+
+    return;
+  }
+
+  const metaMessageId =
+    String(echo?.id || '');
+
+  if (!metaMessageId) {
+    return;
+  }
+
+  const admin =
+    getAdminSupabase();
+
+  /*
+   * Idempotência.
+   * meta_message_id já possui UNIQUE
+   * no banco.
+   */
+  const {
+    data: existingMessage,
+  } = await admin
+    .from('whatsapp_messages')
+    .select('id')
+    .eq(
+      'meta_message_id',
+      metaMessageId
+    )
+    .maybeSingle();
+
+  if (existingMessage) {
+    return;
+  }
+
+  /*
+   * Em smb_message_echoes:
+   *
+   * from = número da empresa
+   * to   = número do cliente
+   */
+  const customerPhone =
+    normalizePhone(echo?.to);
+
+  if (!customerPhone) {
+    console.error(
+      'smb_message_echoes sem telefone do cliente.'
+    );
+
+    return;
+  }
+
+  const sentAt =
+    getMessageTimestamp(echo);
+
+  const messageText =
+    extractWhatsAppMessageText(
+      echo
+    );
+
+  const mediaId =
+    getWhatsAppMediaId(
+      echo
+    );
+
+  const conversation =
+    await findOrCreateConversationForEcho(
+      admin,
+      account,
+      customerPhone,
+      sentAt
+    );
+
+  if (!conversation) {
+    return;
+  }
+
+  const {
+    error: insertError,
+  } = await admin
+    .from('whatsapp_messages')
+    .insert({
+      scope_key:
+        account.scope_key,
+
+      conversation_id:
+        conversation.id,
+
+      meta_message_id:
+        metaMessageId,
+
+      direction:
+        'outbound',
+
+      message_type:
+        echo?.type || 'text',
+
+      sender_phone:
+        normalizePhone(
+          echo?.from
+        ) ||
+        phoneNumberId,
+
+      recipient_phone:
+        customerPhone,
+
+      content:
+        messageText,
+
+      media_id:
+        mediaId,
+
+      status:
+        'sent',
+
+      /*
+       * null é intencional.
+       *
+       * A mensagem foi enviada pelo
+       * WhatsApp Business App e não
+       * por um usuário autenticado
+       * no MirraCRM.
+       */
+      sent_by_user_id:
+        null,
+
+      raw_payload:
+        echo,
+
+      created_at:
+        sentAt,
+    });
+
+  if (insertError) {
+    console.error(
+      'Erro ao gravar smb_message_echoes:',
+      insertError
+    );
+
+    return;
+  }
+
+  /*
+   * IMPORTANTE:
+   *
+   * Atualizamos a última mensagem,
+   * mas NÃO:
+   *
+   * - incrementamos unread_count;
+   * - alteramos last_inbound_at;
+   * - chamamos touch_whatsapp_inbound;
+   * - criamos alerta.
+   *
+   * Portanto uma mensagem enviada
+   * pelo celular não abre/renova
+   * artificialmente a janela de 24h.
+   */
+  await admin
+    .from('whatsapp_conversations')
+    .update({
+      last_message_preview:
+        messageText,
+
+      last_message_at:
+        sentAt,
+
+      updated_at:
+        new Date().toISOString(),
+    })
+    .eq(
+      'id',
+      conversation.id
+    );
+}
+
 export async function GET(
   request: NextRequest
 ) {
@@ -88,7 +457,9 @@ export async function POST(
           error:
             'Invalid signature.',
         },
-        { status: 401 }
+        {
+          status: 401,
+        }
       );
     }
 
@@ -104,17 +475,11 @@ export async function POST(
           error:
             'Payload inválido.',
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
-
-    /*
-     * A Meta espera resposta rápida.
-     *
-     * Processamos todos os eventos
-     * recebidos neste payload antes
-     * de retornar 200.
-     */
 
     const entries =
       Array.isArray(
@@ -136,15 +501,105 @@ export async function POST(
       for (
         const change of changes
       ) {
-        if (
-          change?.field !==
-          'messages'
-        ) {
-          continue;
-        }
+        const field =
+          String(
+            change?.field || ''
+          );
 
         const value =
           change?.value || {};
+
+        /*
+         * COEXISTENCE:
+         * mensagens enviadas pelo
+         * WhatsApp Business App.
+         */
+        if (
+          field ===
+          'smb_message_echoes'
+        ) {
+          const echoes =
+            Array.isArray(
+              value?.message_echoes
+            )
+              ? value.message_echoes
+              : [];
+
+          for (
+            const echo of echoes
+          ) {
+            await processBusinessAppEcho(
+              value,
+              echo
+            );
+          }
+
+          continue;
+        }
+
+        /*
+         * COEXISTENCE:
+         * histórico anterior.
+         *
+         * Nesta etapa NÃO importamos
+         * automaticamente para evitar
+         * transformar histórico antigo
+         * em novas mensagens/alertas.
+         */
+        if (
+          field === 'history'
+        ) {
+          console.log(
+            'WhatsApp Coexistence history recebido.',
+            {
+              wabaId:
+                entry?.id || null,
+              phoneNumberId:
+                value?.metadata
+                  ?.phone_number_id ||
+                null,
+            }
+          );
+
+          continue;
+        }
+
+        /*
+         * COEXISTENCE:
+         * sincronização de estado/
+         * contatos do Business App.
+         *
+         * Reconhecemos o evento,
+         * mas não alteramos Leads
+         * automaticamente nesta etapa.
+         */
+        if (
+          field ===
+          'smb_app_state_sync'
+        ) {
+          console.log(
+            'WhatsApp Coexistence smb_app_state_sync recebido.',
+            {
+              wabaId:
+                entry?.id || null,
+              phoneNumberId:
+                value?.metadata
+                  ?.phone_number_id ||
+                null,
+            }
+          );
+
+          continue;
+        }
+
+        /*
+         * Fluxo tradicional existente.
+         */
+        if (
+          field !== 'messages'
+        ) {
+          continue;
+        }
 
         const phoneNumberId =
           String(
@@ -255,11 +710,6 @@ export async function POST(
             continue;
           }
 
-          /*
-           * Idempotência:
-           * webhook pode ser reenviado
-           * pela Meta.
-           */
           const {
             data: existingMessage,
           } = await admin
@@ -301,29 +751,10 @@ export async function POST(
               message
             );
 
-          let receivedAt =
-            new Date()
-              .toISOString();
-
-          if (
-            message?.timestamp
-          ) {
-            const timestamp =
-              Number(
-                message.timestamp
-              );
-
-            if (
-              Number.isFinite(
-                timestamp
-              )
-            ) {
-              receivedAt =
-                new Date(
-                  timestamp * 1000
-                ).toISOString();
-            }
-          }
+          const receivedAt =
+            getMessageTimestamp(
+              message
+            );
 
           /*
            * 1. BUSCAR LEAD
@@ -377,11 +808,6 @@ export async function POST(
             sellers &&
             sellers.length > 0
           ) {
-            /*
-             * Distribuição por menor
-             * quantidade de conversas
-             * abertas.
-             */
             let selectedSeller =
               sellers[0];
 
@@ -439,12 +865,9 @@ export async function POST(
           }
 
           /*
-           * Se não houver vendedor,
-           * usa owner/admin como fallback.
+           * Owner/admin como fallback.
            */
-          if (
-            !assignedUserId
-          ) {
+          if (!assignedUserId) {
             const {
               data: fallbackUser,
             } = await admin
@@ -478,12 +901,10 @@ export async function POST(
           }
 
           /*
-           * 3. CRIAR LEAD SE NÃO EXISTE
+           * 3. CRIAR LEAD
            */
           if (!lead) {
-            if (
-              !assignedUserId
-            ) {
+            if (!assignedUserId) {
               console.error(
                 'Nenhum usuário disponível para criar lead WhatsApp.'
               );
@@ -492,7 +913,8 @@ export async function POST(
             }
 
             const {
-              data: createdLead,
+              data:
+                createdLead,
               error:
                 createdLeadError,
             } = await admin
@@ -563,7 +985,7 @@ export async function POST(
           }
 
           /*
-           * 4. BUSCAR OU CRIAR CONVERSA
+           * 4. BUSCAR/CRIAR CONVERSA
            */
           let {
             data: conversation,
@@ -586,7 +1008,6 @@ export async function POST(
             const {
               data:
                 createdConversation,
-
               error:
                 conversationError,
             } = await admin
@@ -643,10 +1064,6 @@ export async function POST(
               createdConversation;
           }
 
-          /*
-           * Se a conversa já existia,
-           * preservamos seu vendedor.
-           */
           if (
             conversation
               .assigned_user_id
@@ -657,7 +1074,7 @@ export async function POST(
           }
 
           /*
-           * 5. GRAVAR MENSAGEM
+           * 5. GRAVAR INBOUND
            */
           const {
             error:
@@ -717,7 +1134,9 @@ export async function POST(
           }
 
           /*
-           * 6. ATUALIZAR CONVERSA
+           * 6. SOMENTE INBOUND
+           * atualiza janela de 24h
+           * e unread_count.
            */
           await admin.rpc(
             'touch_whatsapp_inbound',
@@ -734,15 +1153,9 @@ export async function POST(
           );
 
           /*
-           * 7. CRIAR ALERTA
-           *
-           * IMPORTANTE:
-           * seu schema usa user_id,
-           * não profile_id.
+           * 7. ALERTA
            */
-          if (
-            assignedUserId
-          ) {
+          if (assignedUserId) {
             await admin
               .from('alerts')
               .insert({
@@ -781,10 +1194,6 @@ export async function POST(
       error
     );
 
-    /*
-     * Não mascaramos erros durante
-     * desenvolvimento.
-     */
     return NextResponse.json(
       {
         ok: false,
@@ -792,7 +1201,9 @@ export async function POST(
           error?.message ||
           'Erro inesperado.',
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
