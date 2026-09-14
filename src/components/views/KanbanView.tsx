@@ -1,7 +1,7 @@
 'use client';
 import React, { useRef, useState } from 'react';
 import { useCRMStore, getLeadCardStatus, type Stage } from '@/src/store/crmStore';
-import { FileSpreadsheet, FileDown, Trash2, GripVertical, Search, X, CheckSquare, Square, ListChecks } from 'lucide-react';
+import { FileSpreadsheet, FileDown, Trash2, GripVertical, Search, X, CheckSquare, Square, ListChecks, Mail, Paperclip, Send, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 interface KanbanViewProps {
@@ -12,7 +12,7 @@ interface KanbanViewProps {
 
 export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: KanbanViewProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { addLead, moveLead, deleteLead, deleteLeads, theme, leads, currentUser } = useCRMStore();
+  const { addLead, moveLead, deleteLead, deleteLeads, theme, leads, currentUser, accessToken, loadLeads } = useCRMStore();
   const [isProcessing, setIsProcessing] = useState(false);
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<Stage | null>(null);
@@ -25,9 +25,130 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
   const [isDeleting, setIsDeleting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
+  // Compositor de e-mail do lead
+  const [emailLeadId, setEmailLeadId] = useState<string | null>(null);
+  const [emailTo, setEmailTo] = useState('');
+  const [emailSubject, setEmailSubject] = useState('');
+  const [emailBody, setEmailBody] = useState('');
+  const [emailAttachments, setEmailAttachments] = useState<File[]>([]);
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [emailMessage, setEmailMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const emailAttachmentInputRef = useRef<HTMLInputElement>(null);
+
   const isOwner = currentUser?.role === 'owner';
 
   const myLeads = leads;
+
+  const isValidEmail = (value: string) => {
+    const email = (value || '').trim();
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  };
+
+  const openEmailComposer = (leadId: string, email: string, leadName: string) => {
+    setEmailLeadId(leadId);
+    setEmailTo(email.trim());
+    setEmailSubject(`Contato MirraCRM - ${leadName}`);
+    setEmailBody(`Olá ${leadName},\n\n`);
+    setEmailAttachments([]);
+    setEmailMessage(null);
+  };
+
+  const closeEmailComposer = () => {
+    if (sendingEmail) return;
+    setEmailLeadId(null);
+    setEmailTo('');
+    setEmailSubject('');
+    setEmailBody('');
+    setEmailAttachments([]);
+    setEmailMessage(null);
+    if (emailAttachmentInputRef.current) emailAttachmentInputRef.current.value = '';
+  };
+
+  const handleEmailFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    const combined = [...emailAttachments, ...files];
+
+    if (combined.length > 5) {
+      setEmailMessage({ type: 'error', text: 'Você pode anexar no máximo 5 arquivos por e-mail.' });
+      e.target.value = '';
+      return;
+    }
+
+    const tooLarge = combined.find((file) => file.size > 10 * 1024 * 1024);
+    if (tooLarge) {
+      setEmailMessage({ type: 'error', text: `O arquivo "${tooLarge.name}" ultrapassa o limite de 10 MB.` });
+      e.target.value = '';
+      return;
+    }
+
+    setEmailAttachments(combined);
+    setEmailMessage(null);
+    e.target.value = '';
+  };
+
+  const removeEmailAttachment = (index: number) => {
+    setEmailAttachments((current) => current.filter((_, i) => i !== index));
+  };
+
+  const handleSendEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!emailLeadId) return;
+    if (!accessToken) {
+      setEmailMessage({ type: 'error', text: 'Sua sessão expirou. Faça login novamente.' });
+      return;
+    }
+    if (!isValidEmail(emailTo)) {
+      setEmailMessage({ type: 'error', text: 'Informe um endereço de e-mail válido.' });
+      return;
+    }
+    if (!emailSubject.trim()) {
+      setEmailMessage({ type: 'error', text: 'Informe o assunto do e-mail.' });
+      return;
+    }
+    if (!emailBody.trim()) {
+      setEmailMessage({ type: 'error', text: 'Escreva a mensagem antes de enviar.' });
+      return;
+    }
+
+    setSendingEmail(true);
+    setEmailMessage(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('accessToken', accessToken);
+      formData.append('leadId', emailLeadId);
+      formData.append('to', emailTo.trim());
+      formData.append('subject', emailSubject.trim());
+      formData.append('body', emailBody);
+      emailAttachments.forEach((file) => formData.append('attachments', file));
+
+      const response = await fetch('/api/email/send', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok || !data?.ok) {
+        throw new Error(data?.error || `Não foi possível enviar o e-mail. HTTP ${response.status}.`);
+      }
+
+      setEmailMessage({
+        type: 'success',
+        text: 'Gmail aceitou o envio. O e-mail foi registrado no histórico do lead.',
+      });
+
+      await loadLeads();
+    } catch (error: any) {
+      setEmailMessage({
+        type: 'error',
+        text: error?.message || 'Erro inesperado ao enviar o e-mail.',
+      });
+    } finally {
+      setSendingEmail(false);
+    }
+  };
 
   const sectors = Array.from(
     new Set(
@@ -519,6 +640,27 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
                       {lead.emailCorporativo && (
                         <div className="text-[11px] text-slate-400 truncate mb-1 pl-5">✉️ {lead.emailCorporativo}</div>
                       )}
+
+                      {!selectionMode && isValidEmail(lead.emailCorporativo) && (
+                        <div className="pl-5 mt-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openEmailComposer(lead.id, lead.emailCorporativo, lead.nome);
+                            }}
+                            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition-colors ${
+                              theme === 'dark'
+                                ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20'
+                                : 'border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
+                            }`}
+                            title={`Enviar e-mail para ${lead.emailCorporativo}`}
+                          >
+                            <Mail className="w-3.5 h-3.5" />
+                            E-mail
+                          </button>
+                        </div>
+                      )}
                       {lead.cargo && (
                         <div className={`mt-2 pt-2 border-t text-[10px] line-clamp-2 leading-relaxed pl-5 ${
                           theme === 'dark' ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-600'
@@ -539,6 +681,188 @@ export default function KanbanView({ onOpenLead, onAddLead, onEditLead }: Kanban
           );
         })}
       </div>
+
+      {emailLeadId && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) closeEmailComposer();
+          }}
+        >
+          <div
+            className={`w-full max-w-2xl rounded-2xl border shadow-2xl ${
+              theme === 'dark'
+                ? 'bg-slate-950 border-slate-700 text-slate-100'
+                : 'bg-white border-slate-200 text-slate-900'
+            }`}
+          >
+            <div className={`flex items-center justify-between gap-3 px-5 py-4 border-b ${theme === 'dark' ? 'border-slate-800' : 'border-slate-200'}`}>
+              <div>
+                <h2 className="font-black text-base flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-indigo-500" />
+                  Enviar e-mail
+                </h2>
+                <p className={`text-xs mt-1 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
+                  Envie mensagens e propostas diretamente pelo Gmail conectado ao MirraCRM.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeEmailComposer}
+                disabled={sendingEmail}
+                className={`p-2 rounded-lg transition-colors disabled:opacity-40 ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-100 text-slate-500'}`}
+                aria-label="Fechar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSendEmail} className="p-5 space-y-4">
+              {emailMessage && (
+                <div className={`rounded-xl border p-3 text-sm flex items-start gap-2 ${
+                  emailMessage.type === 'success'
+                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500'
+                    : 'border-rose-500/30 bg-rose-500/10 text-rose-500'
+                }`}>
+                  {emailMessage.type === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  )}
+                  <span>{emailMessage.text}</span>
+                </div>
+              )}
+
+              <div>
+                <label className={`text-xs font-bold ${theme === 'dark' ? 'text-slate-300' : 'text-slate-600'}`}>Para</label>
+                <input
+                  type="email"
+                  value={emailTo}
+                  onChange={(e) => setEmailTo(e.target.value)}
+                  disabled={sendingEmail}
+                  className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none focus:border-indigo-500 disabled:opacity-60 ${
+                    theme === 'dark' ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
+                  }`}
+                />
+              </div>
+
+              <div>
+                <label className={`text-xs font-bold ${theme === 'dark' ? 'text-slate-300' : 'text-slate-600'}`}>Assunto</label>
+                <input
+                  type="text"
+                  value={emailSubject}
+                  onChange={(e) => setEmailSubject(e.target.value)}
+                  disabled={sendingEmail}
+                  className={`mt-1.5 w-full rounded-xl border px-3 py-2.5 text-sm outline-none focus:border-indigo-500 disabled:opacity-60 ${
+                    theme === 'dark' ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
+                  }`}
+                />
+              </div>
+
+              <div>
+                <label className={`text-xs font-bold ${theme === 'dark' ? 'text-slate-300' : 'text-slate-600'}`}>Mensagem</label>
+                <textarea
+                  value={emailBody}
+                  onChange={(e) => setEmailBody(e.target.value)}
+                  disabled={sendingEmail}
+                  rows={9}
+                  className={`mt-1.5 w-full resize-y rounded-xl border px-3 py-2.5 text-sm outline-none focus:border-indigo-500 disabled:opacity-60 ${
+                    theme === 'dark' ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
+                  }`}
+                />
+              </div>
+
+              <div>
+                <input
+                  ref={emailAttachmentInputRef}
+                  type="file"
+                  multiple
+                  onChange={handleEmailFiles}
+                  disabled={sendingEmail || emailAttachments.length >= 5}
+                  className="hidden"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => emailAttachmentInputRef.current?.click()}
+                  disabled={sendingEmail || emailAttachments.length >= 5}
+                  className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold transition-colors disabled:opacity-40 ${
+                    theme === 'dark'
+                      ? 'border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <Paperclip className="w-4 h-4" />
+                  Anexar arquivo
+                </button>
+                <span className={`ml-2 text-[10px] ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>
+                  Até 5 arquivos, máximo 10 MB cada.
+                </span>
+
+                {emailAttachments.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {emailAttachments.map((file, index) => (
+                      <div
+                        key={`${file.name}-${file.size}-${index}`}
+                        className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${
+                          theme === 'dark' ? 'border-slate-800 bg-slate-900/70' : 'border-slate-200 bg-slate-50'
+                        }`}
+                      >
+                        <div className="min-w-0 flex items-center gap-2">
+                          <Paperclip className="w-3.5 h-3.5 shrink-0 text-indigo-500" />
+                          <span className="truncate">{file.name}</span>
+                          <span className={`shrink-0 ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>
+                            {(file.size / 1024 / 1024).toFixed(2)} MB
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeEmailAttachment(index)}
+                          disabled={sendingEmail}
+                          className="text-rose-500 hover:text-rose-400 disabled:opacity-40"
+                          title="Remover anexo"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className={`flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-4 border-t ${theme === 'dark' ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button
+                  type="button"
+                  onClick={closeEmailComposer}
+                  disabled={sendingEmail}
+                  className={`rounded-xl border px-4 py-2.5 text-xs font-bold transition-colors disabled:opacity-40 ${
+                    theme === 'dark' ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={sendingEmail || !isValidEmail(emailTo) || !emailSubject.trim() || !emailBody.trim()}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-black text-white shadow-lg transition-colors hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {sendingEmail ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Enviando...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      Enviar e-mail
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
