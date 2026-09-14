@@ -430,15 +430,34 @@ setEmailAccount(account);
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={loadEmailAccount}
-                >
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                  Atualizar status
-                </Button>
-              </div>
+  <Button
+    type="button"
+    variant="outline"
+    onClick={loadEmailAccount}
+    disabled={connectingGoogle}
+  >
+    <RefreshCw className="w-4 h-4 mr-2" />
+    Atualizar status
+  </Button>
+
+  <Button
+    type="button"
+    onClick={handleConnectGoogle}
+    disabled={connectingGoogle}
+  >
+    {connectingGoogle ? (
+      <>
+        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+        Reconectando...
+      </>
+    ) : (
+      <>
+        <Link2 className="w-4 h-4 mr-2" />
+        Reconectar Gmail
+      </>
+    )}
+  </Button>
+</div>
             </div>
           ) : (
             <div className="space-y-4">
