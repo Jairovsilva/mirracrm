@@ -47,6 +47,16 @@ interface MetaSubscribedAppsResponse {
   error?: MetaError;
 }
 
+interface SavedWhatsAppAccount {
+  id: string;
+  scope_key: string;
+  waba_id: string;
+  phone_number_id: string;
+  display_phone_number: string | null;
+  verified_name: string | null;
+  status: string;
+}
+
 function normalizeMetaId(value: unknown): string {
   return String(value || '').trim();
 }
@@ -59,8 +69,8 @@ function getGraphVersion(): string {
  * Troca o authorization code temporário retornado
  * pelo Embedded Signup por um access token.
  *
- * Todo esse processo acontece no servidor.
- * O token nunca é devolvido ao navegador.
+ * O App Secret permanece exclusivamente no servidor.
+ * O access token nunca é devolvido ao navegador.
  */
 async function exchangeCodeForToken(code: string): Promise<string> {
   const appId = process.env.NEXT_PUBLIC_META_APP_ID;
@@ -117,8 +127,8 @@ async function exchangeCodeForToken(code: string): Promise<string> {
 /**
  * Consulta os números pertencentes à WABA autorizada.
  *
- * Fazemos isso no backend para não confiar apenas
- * no wabaId/phoneNumberId enviados pelo frontend.
+ * Isso é feito no backend para não confiarmos
+ * somente nos IDs recebidos do navegador.
  */
 async function getAllWabaPhoneNumbers(
   accessToken: string,
@@ -172,7 +182,7 @@ async function getAllWabaPhoneNumbers(
 
 /**
  * Assina o aplicativo na WABA autorizada para
- * que os webhooks possam ser entregues ao MirraCRM.
+ * permitir o recebimento dos webhooks.
  */
 async function subscribeAppToWaba(
   accessToken: string,
@@ -214,7 +224,7 @@ async function subscribeAppToWaba(
 export async function POST(request: NextRequest) {
   try {
     /**
-     * 1. Autenticar usuário do MirraCRM.
+     * 1. Autenticar o usuário do MirraCRM.
      */
     const requester = await getRequesterContext(request);
 
@@ -232,7 +242,7 @@ export async function POST(request: NextRequest) {
 
     /**
      * Somente owner/admin pode conectar
-     * uma conta WhatsApp ao tenant.
+     * uma conta do WhatsApp.
      */
     if (
       requester.role !== 'owner' &&
@@ -288,7 +298,7 @@ export async function POST(request: NextRequest) {
 
     /**
      * 3. Trocar o authorization code temporário
-     * por access token no servidor.
+     * por um access token no servidor.
      */
     const accessToken = await exchangeCodeForToken(code);
 
@@ -326,7 +336,8 @@ export async function POST(request: NextRequest) {
     const admin = getAdminSupabase();
 
     /**
-     * 6. Verificar se o phone_number_id já existe.
+     * 6. Verificar se o phone_number_id
+     * já existe no MirraCRM.
      */
     const {
       data: existingAccount,
@@ -349,8 +360,8 @@ export async function POST(request: NextRequest) {
     }
 
     /**
-     * Impede que um número já associado a outro
-     * tenant/scope seja apropriado pelo tenant atual.
+     * Um phone_number_id já pertencente a outro
+     * scope não pode ser apropriado pelo tenant atual.
      */
     if (
       existingAccount &&
@@ -372,7 +383,8 @@ export async function POST(request: NextRequest) {
      * 7. Guardar o access token no Supabase Vault.
      *
      * whatsapp_accounts recebe somente o UUID
-     * do segredo, nunca o token em texto puro.
+     * do segredo. O token não é armazenado em
+     * texto puro na tabela.
      */
     let accessTokenSecretId: string | null =
       existingAccount?.access_token_secret_id || null;
@@ -419,7 +431,7 @@ export async function POST(request: NextRequest) {
     }
 
     /**
-     * 8. Criar/atualizar a conta WhatsApp.
+     * 8. Criar ou atualizar a conta WhatsApp.
      */
     const accountPayload = {
       scope_key: requester.scopeKey,
@@ -435,7 +447,7 @@ export async function POST(request: NextRequest) {
     };
 
     const {
-      data: savedAccount,
+      data: savedAccountData,
       error: saveAccountError,
     } = await admin
       .from('whatsapp_accounts')
@@ -443,19 +455,11 @@ export async function POST(request: NextRequest) {
         onConflict: 'phone_number_id',
       })
       .select(
-        [
-          'id',
-          'scope_key',
-          'waba_id',
-          'phone_number_id',
-          'display_phone_number',
-          'verified_name',
-          'status',
-        ].join(',')
+        'id, scope_key, waba_id, phone_number_id, display_phone_number, verified_name, status'
       )
       .single();
 
-    if (saveAccountError || !savedAccount) {
+    if (saveAccountError || !savedAccountData) {
       console.error(
         'Erro ao salvar conta WhatsApp:',
         saveAccountError
@@ -467,12 +471,21 @@ export async function POST(request: NextRequest) {
     }
 
     /**
+     * O client Supabase utilizado pelo projeto não
+     * possui tipos gerados específicos para esta
+     * tabela. Portanto, fazemos aqui uma conversão
+     * explícita para o formato que acabamos de
+     * selecionar.
+     */
+    const savedAccount =
+      savedAccountData as unknown as SavedWhatsAppAccount;
+
+    /**
      * 9. Depois que a nova conta estiver salva,
      * desativar outras contas ativas do mesmo scope.
      *
-     * Assim mantemos somente uma integração ativa
-     * por tenant e preservamos o comportamento atual
-     * do WhatsAppView.
+     * Isso preserva o comportamento atual do
+     * WhatsAppView, que espera uma conta ativa.
      */
     const { error: deactivateError } = await admin
       .from('whatsapp_accounts')
@@ -496,12 +509,22 @@ export async function POST(request: NextRequest) {
     }
 
     /**
-     * Nunca retornar access token ou secret ID
-     * ao navegador.
+     * 10. Retornar somente dados não sensíveis.
+     *
+     * Access token e UUID do segredo do Vault
+     * nunca são enviados ao navegador.
      */
     return NextResponse.json({
       ok: true,
-      account: savedAccount,
+      account: {
+        id: savedAccount.id,
+        scope_key: savedAccount.scope_key,
+        waba_id: savedAccount.waba_id,
+        phone_number_id: savedAccount.phone_number_id,
+        display_phone_number: savedAccount.display_phone_number,
+        verified_name: savedAccount.verified_name,
+        status: savedAccount.status,
+      },
     });
   } catch (error: unknown) {
     console.error(
