@@ -113,6 +113,131 @@ interface WhatsAppAccount {
   status: 'active' | 'inactive' | 'error';
 }
 
+interface MetaEmbeddedSignupSession {
+  wabaId: string;
+  phoneNumberId: string;
+}
+
+interface MetaEmbeddedSignupMessage {
+  type?: string;
+  event?: string;
+  data?: {
+    waba_id?: string;
+    wabaId?: string;
+    phone_number_id?: string;
+    phoneNumberId?: string;
+    error_message?: string;
+    errorMessage?: string;
+  };
+}
+
+interface MetaLoginResponse {
+  authResponse?: {
+    code?: string;
+  };
+  status?: string;
+}
+
+const META_SDK_SCRIPT_ID = 'facebook-jssdk';
+const META_SDK_URL = 'https://connect.facebook.net/en_US/sdk.js';
+
+function getMetaGraphApiVersion(): string {
+  const version =
+    process.env.NEXT_PUBLIC_WHATSAPP_GRAPH_API_VERSION?.trim();
+
+  if (!version) {
+    throw new Error(
+      'NEXT_PUBLIC_WHATSAPP_GRAPH_API_VERSION não configurado.'
+    );
+  }
+
+  return version;
+}
+
+function loadMetaSdk(appId: string): Promise<any> {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') {
+      reject(
+        new Error(
+          'O Embedded Signup só pode ser aberto no navegador.'
+        )
+      );
+      return;
+    }
+
+    const initialize = () => {
+      const facebook = (window as any).FB;
+
+      if (!facebook) {
+        reject(
+          new Error(
+            'O SDK da Meta não foi carregado corretamente.'
+          )
+        );
+        return;
+      }
+
+      try {
+        facebook.init({
+          appId,
+          cookie: true,
+          xfbml: false,
+          version: getMetaGraphApiVersion(),
+        });
+
+        resolve(facebook);
+      } catch (sdkError) {
+        reject(sdkError);
+      }
+    };
+
+    if ((window as any).FB) {
+      initialize();
+      return;
+    }
+
+    const existingScript = document.getElementById(
+      META_SDK_SCRIPT_ID
+    ) as HTMLScriptElement | null;
+
+    (window as any).fbAsyncInit = initialize;
+
+    if (existingScript) {
+      existingScript.addEventListener('load', initialize, {
+        once: true,
+      });
+      existingScript.addEventListener(
+        'error',
+        () => {
+          reject(
+            new Error(
+              'Não foi possível carregar o SDK da Meta.'
+            )
+          );
+        },
+        { once: true }
+      );
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.id = META_SDK_SCRIPT_ID;
+    script.src = META_SDK_URL;
+    script.async = true;
+    script.defer = true;
+    script.crossOrigin = 'anonymous';
+    script.onerror = () => {
+      reject(
+        new Error(
+          'Não foi possível carregar o SDK da Meta.'
+        )
+      );
+    };
+
+    document.body.appendChild(script);
+  });
+}
+
 function getRelationOne<T>(
   relation: T | T[] | null | undefined
 ): T | null {
@@ -303,6 +428,16 @@ export function WhatsAppView() {
 
   const messagesEndRef =
     useRef<HTMLDivElement>(null);
+
+
+  const embeddedSignupCodeRef =
+    useRef<string | null>(null);
+
+  const embeddedSignupSessionRef =
+    useRef<MetaEmbeddedSignupSession | null>(null);
+
+  const completingEmbeddedSignupRef =
+    useRef(false);
 
   const selectedConversation =
     useMemo(
@@ -548,17 +683,35 @@ export function WhatsAppView() {
       [apiFetch]
     );
 
-  const handleSetup =
+  const completeEmbeddedSignup =
     useCallback(async () => {
-      setConnecting(true);
-      setError(null);
+      const code =
+        embeddedSignupCodeRef.current;
+
+      const session =
+        embeddedSignupSessionRef.current;
+
+      if (
+        !code ||
+        !session ||
+        completingEmbeddedSignupRef.current
+      ) {
+        return;
+      }
+
+      completingEmbeddedSignupRef.current = true;
 
       try {
         await apiFetch(
-          '/api/whatsapp/setup',
+          '/api/whatsapp/embedded-signup/complete',
           {
             method: 'POST',
-            body: JSON.stringify({}),
+            body: JSON.stringify({
+              code,
+              wabaId: session.wabaId,
+              phoneNumberId:
+                session.phoneNumberId,
+            }),
           }
         );
 
@@ -566,18 +719,224 @@ export function WhatsAppView() {
         await loadConversations();
 
         setError(null);
-      } catch (setupError: any) {
+      } catch (signupError: any) {
+        console.error(
+          'Erro ao concluir Embedded Signup:',
+          signupError
+        );
+
         setError(
-          setupError?.message ||
-            'Não foi possível configurar o WhatsApp.'
+          signupError?.message ||
+            'Não foi possível concluir a conexão do WhatsApp Business.'
         );
       } finally {
+        embeddedSignupCodeRef.current = null;
+        embeddedSignupSessionRef.current = null;
+        completingEmbeddedSignupRef.current = false;
         setConnecting(false);
       }
     }, [
       apiFetch,
       loadAccount,
       loadConversations,
+    ]);
+
+  useEffect(() => {
+    const handleEmbeddedSignupMessage = (
+      event: MessageEvent
+    ) => {
+      if (
+        event.origin !==
+          'https://www.facebook.com' &&
+        event.origin !==
+          'https://web.facebook.com'
+      ) {
+        return;
+      }
+
+      let payload: MetaEmbeddedSignupMessage;
+
+      try {
+        payload =
+          typeof event.data === 'string'
+            ? JSON.parse(event.data)
+            : event.data;
+      } catch {
+        return;
+      }
+
+      if (
+        !payload ||
+        payload.type !==
+          'WA_EMBEDDED_SIGNUP'
+      ) {
+        return;
+      }
+
+      const signupEvent =
+        String(payload.event || '');
+
+      if (
+        signupEvent === 'FINISH' ||
+        signupEvent ===
+          'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING'
+      ) {
+        const wabaId = String(
+          payload.data?.waba_id ||
+            payload.data?.wabaId ||
+            ''
+        ).trim();
+
+        const phoneNumberId = String(
+          payload.data?.phone_number_id ||
+            payload.data?.phoneNumberId ||
+            ''
+        ).trim();
+
+        if (!wabaId || !phoneNumberId) {
+          setConnecting(false);
+          setError(
+            'A Meta concluiu o cadastro, mas não retornou os identificadores da conta do WhatsApp.'
+          );
+          return;
+        }
+
+        embeddedSignupSessionRef.current = {
+          wabaId,
+          phoneNumberId,
+        };
+
+        void completeEmbeddedSignup();
+        return;
+      }
+
+      if (
+        signupEvent === 'CANCEL' ||
+        signupEvent === 'ERROR'
+      ) {
+        embeddedSignupCodeRef.current = null;
+        embeddedSignupSessionRef.current = null;
+        completingEmbeddedSignupRef.current = false;
+        setConnecting(false);
+
+        if (signupEvent === 'ERROR') {
+          setError(
+            payload.data?.error_message ||
+              payload.data?.errorMessage ||
+              'A Meta informou um erro durante a conexão do WhatsApp Business.'
+          );
+        }
+      }
+    };
+
+    window.addEventListener(
+      'message',
+      handleEmbeddedSignupMessage
+    );
+
+    return () => {
+      window.removeEventListener(
+        'message',
+        handleEmbeddedSignupMessage
+      );
+    };
+  }, [completeEmbeddedSignup]);
+
+  const handleEmbeddedSignup =
+    useCallback(async () => {
+      if (connecting) {
+        return;
+      }
+
+      const appId =
+        process.env.NEXT_PUBLIC_META_APP_ID?.trim();
+
+      const configId =
+        process.env
+          .NEXT_PUBLIC_WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID?.trim();
+
+      if (!appId || !configId) {
+        setError(
+          'As configurações públicas do Embedded Signup não estão disponíveis neste ambiente.'
+        );
+        return;
+      }
+
+      try {
+        // Valida antes de abrir o fluxo para evitar
+        // um popup que nunca poderia ser concluído.
+        getMetaGraphApiVersion();
+
+        setConnecting(true);
+        setError(null);
+
+        embeddedSignupCodeRef.current = null;
+        embeddedSignupSessionRef.current = null;
+        completingEmbeddedSignupRef.current = false;
+
+        const facebook =
+          await loadMetaSdk(appId);
+
+        facebook.login(
+          (response: MetaLoginResponse) => {
+            const code = String(
+              response?.authResponse?.code ||
+                ''
+            ).trim();
+
+            if (!code) {
+              embeddedSignupCodeRef.current = null;
+              embeddedSignupSessionRef.current = null;
+              completingEmbeddedSignupRef.current = false;
+              setConnecting(false);
+
+              if (
+                response?.status &&
+                response.status !== 'unknown'
+              ) {
+                setError(
+                  'A Meta não retornou o código de autorização necessário para concluir a conexão.'
+                );
+              }
+
+              return;
+            }
+
+            embeddedSignupCodeRef.current = code;
+
+            void completeEmbeddedSignup();
+          },
+          {
+            config_id: configId,
+            response_type: 'code',
+            override_default_response_type: true,
+            extras: {
+              setup: {},
+              featureType:
+                'whatsapp_business_app_onboarding',
+              sessionInfoVersion: '3',
+            },
+          }
+        );
+      } catch (signupError: any) {
+        console.error(
+          'Erro ao abrir Embedded Signup:',
+          signupError
+        );
+
+        embeddedSignupCodeRef.current = null;
+        embeddedSignupSessionRef.current = null;
+        completingEmbeddedSignupRef.current = false;
+        setConnecting(false);
+
+        setError(
+          signupError?.message ||
+            'Não foi possível abrir a conexão com a Meta.'
+        );
+      }
+    }, [
+      completeEmbeddedSignup,
+      connecting,
     ]);
 
   const handleSend =
@@ -943,7 +1302,7 @@ export function WhatsAppView() {
                 type="button"
                 size="sm"
                 onClick={
-                  handleSetup
+                  handleEmbeddedSignup
                 }
                 disabled={
                   connecting
@@ -955,7 +1314,7 @@ export function WhatsAppView() {
                   <Settings2 className="w-4 h-4 mr-2" />
                 )}
 
-                Ativar integração
+                Conectar WhatsApp Business
               </Button>
             )}
         </div>
