@@ -317,15 +317,29 @@ export async function POST(
      * 1. Autenticar usuário do MirraCRM.
      */
     const requester =
-      await getRequesterContext(
-        request
-      );
+  await getRequesterContext(
+    request
+  );
 
-    if (
-      requester.role !==
-        'owner' &&
-      requester.role !==
-        'admin'
+if (!requester) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error:
+        'Usuário não autenticado.',
+    },
+    {
+      status: 401,
+    }
+  );
+}
+
+if (
+  requester.role !==
+    'owner' &&
+  requester.role !==
+    'admin'
+) {
     ) {
       return NextResponse.json(
         {
