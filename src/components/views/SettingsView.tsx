@@ -97,13 +97,16 @@ export function SettingsView() {
         return;
       }
 
-      const response = await fetch('/api/email/account', {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        cache: 'no-store',
-      });
+   const response = await fetch('/api/email/account', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    accessToken: session.access_token,
+  }),
+  cache: 'no-store',
+});
 
       const data = await response.json().catch(() => null);
 
@@ -114,13 +117,19 @@ export function SettingsView() {
         );
       }
 
-      const account =
-        data?.account ??
-        data?.emailAccount ??
-        data?.data ??
-        null;
+    const account = data?.account
+  ? {
+      id: data.account.id,
+      provider: data.account.provider,
+      email_address: data.account.emailAddress,
+      display_name: data.account.displayName,
+      status: data.account.status,
+      last_error: data.account.lastError,
+      connected_at: data.account.connectedAt,
+    }
+  : null;
 
-      setEmailAccount(account);
+setEmailAccount(account);
 
       const params = new URLSearchParams(window.location.search);
       const emailStatus = params.get('email');
