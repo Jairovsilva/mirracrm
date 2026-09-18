@@ -78,6 +78,43 @@ export async function GET(
       );
     }
 
+    /*
+     * AUTORIZAÇÃO:
+     *
+     * Proprietário e administradores podem
+     * acessar todas as conversas do
+     * próprio ambiente.
+     *
+     * Vendedores podem acessar somente
+     * conversas atribuídas a eles.
+     *
+     * Conversas sem responsável ficam
+     * disponíveis apenas para owner/admin.
+     */
+    const isManager =
+      requester.role === 'owner' ||
+      requester.role === 'admin';
+
+    const canAccessConversation =
+      conversation.scope_key ===
+        requester.scopeKey &&
+      (
+        isManager ||
+        conversation.assigned_user_id ===
+          requester.userId
+      );
+
+    if (!canAccessConversation) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            'Conversa não encontrada.',
+        },
+        { status: 404 }
+      );
+    }
+
     const {
       data: messages,
       error: messagesError,
@@ -127,6 +164,9 @@ export async function GET(
      * Marcação de "lido no CRM".
      * Usamos service_role porque usuários
      * não possuem UPDATE direto por RLS.
+     *
+     * Esta operação só acontece depois
+     * da validação de autorização acima.
      */
     const admin =
       getAdminSupabase();
