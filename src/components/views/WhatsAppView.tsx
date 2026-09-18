@@ -1913,3 +1913,4 @@ export function WhatsAppView() {
       </div>
     </div>
   );
+}
