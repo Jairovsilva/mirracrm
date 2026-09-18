@@ -234,8 +234,9 @@ export async function POST(
      * do mesmo scope do usuário.
      *
      * Também carregamos o
-     * access_token_secret_id da
-     * conta WhatsApp.
+     * responsável pela conversa
+     * e o access_token_secret_id
+     * da conta WhatsApp.
      */
     const {
       data: conversation,
@@ -247,6 +248,7 @@ export async function POST(
       .select(`
         id,
         scope_key,
+        assigned_user_id,
         phone_number,
         last_inbound_at,
         whatsapp_account_id,
@@ -284,7 +286,43 @@ export async function POST(
     }
 
     /**
-     * 4. Regra de atendimento
+     * 4. AUTORIZAÇÃO DO ATENDIMENTO.
+     *
+     * Proprietários e administradores
+     * podem atender todas as conversas
+     * do próprio ambiente.
+     *
+     * Vendedores podem enviar mensagens
+     * somente nas conversas atribuídas
+     * a eles.
+     *
+     * A verificação acontece ANTES
+     * de recuperar credenciais e
+     * ANTES de chamar a Meta.
+     */
+    const isManager =
+      requester.role === 'owner' ||
+      requester.role === 'admin';
+
+    if (
+      !isManager &&
+      conversation.assigned_user_id !==
+        requester.userId
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            'Você não tem permissão para enviar mensagens nesta conversa.',
+        },
+        {
+          status: 403,
+        }
+      );
+    }
+
+    /**
+     * 5. Regra de atendimento
      * dentro da janela de 24 horas.
      */
     if (
@@ -361,7 +399,7 @@ export async function POST(
     }
 
     /**
-     * 5. Recuperar a credencial
+     * 6. Recuperar a credencial
      * específica da conta.
      *
      * Para contas Embedded Signup,
@@ -377,7 +415,7 @@ export async function POST(
       getGraphVersion();
 
     /**
-     * 6. Enviar mensagem para
+     * 7. Enviar mensagem para
      * a Meta Cloud API.
      */
     const url =
@@ -422,7 +460,7 @@ export async function POST(
       await metaResponse.json();
 
     /**
-     * 7. Tratar erro da Meta.
+     * 8. Tratar erro da Meta.
      */
     if (!metaResponse.ok) {
       console.error(
@@ -487,7 +525,7 @@ export async function POST(
       new Date().toISOString();
 
     /**
-     * 8. Registrar mensagem
+     * 9. Registrar mensagem
      * enviada no MirraCRM.
      */
     const {
@@ -560,7 +598,7 @@ export async function POST(
     }
 
     /**
-     * 9. Atualizar resumo da
+     * 10. Atualizar resumo da
      * conversa.
      */
     const {
@@ -599,7 +637,7 @@ export async function POST(
     }
 
     /**
-     * 10. Resposta para o
+     * 11. Resposta para o
      * frontend.
      *
      * Nenhum access token ou
