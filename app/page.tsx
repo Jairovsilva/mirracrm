@@ -1,8 +1,10 @@
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
 import Image from 'next/image';
-import { Mail, Lock, User, ArrowRight, CheckCircle2, Sparkles } from 'lucide-react';
+import Link from 'next/link';
+import { Mail, Lock, User, ArrowRight, Sparkles } from 'lucide-react';
 import { useCRMStore } from '@/src/store/crmStore';
 import { supabase } from '@/src/lib/supabaseClient';
 
@@ -18,26 +20,33 @@ export default function Home() {
   const login = useCRMStore((s) => s.login);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    let active = true;
 
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) {
+      if (active && data.session) {
         window.location.href = '/app';
       }
     });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    if (!email || !password || (!isLogin && !name)) {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail || !password || (!isLogin && !name.trim())) {
       setError('Por favor, preencha todos os campos obrigatórios.');
       return;
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+
+    if (!emailRegex.test(normalizedEmail)) {
       setError('Por favor, insira um endereço de e-mail válido.');
       return;
     }
@@ -51,14 +60,20 @@ export default function Home() {
 
     try {
       if (isLogin) {
-        const result = await login(email, password);
+        const result = await login(normalizedEmail, password);
+
         if (result.ok) {
           window.location.href = '/app';
         } else {
           setError(result.error || 'Credenciais incorretas.');
         }
       } else {
-        const result = await register(email, password, name);
+        const result = await register(
+          normalizedEmail,
+          password,
+          name.trim()
+        );
+
         if (result.ok) {
           window.location.href = '/app';
         } else {
@@ -85,22 +100,37 @@ export default function Home() {
             height={32}
             className="rounded-lg shadow-sm"
           />
+
           <span className="font-bold text-lg tracking-tight text-neutral-950">
-            Mirra<span className="font-normal text-indigo-600">CRM</span>
+            Mirra
+            <span className="font-normal text-indigo-600">
+              CRM
+            </span>
           </span>
         </div>
 
         <div className="flex items-center gap-4">
           <button
             type="button"
-            onClick={() => { setIsLogin(true); setError(''); }}
-            className={`text-sm font-medium transition-colors ${isLogin ? 'text-indigo-600' : 'text-neutral-500 hover:text-neutral-950'}`}
+            onClick={() => {
+              setIsLogin(true);
+              setError('');
+            }}
+            className={`text-sm font-medium transition-colors ${
+              isLogin
+                ? 'text-indigo-600'
+                : 'text-neutral-500 hover:text-neutral-950'
+            }`}
           >
             Entrar
           </button>
+
           <button
             type="button"
-            onClick={() => { setIsLogin(false); setError(''); }}
+            onClick={() => {
+              setIsLogin(false);
+              setError('');
+            }}
             className="text-sm font-medium bg-neutral-950 hover:bg-neutral-800 text-white px-5 py-2.5 rounded-full transition-all shadow-sm"
           >
             Teste Grátis
@@ -114,17 +144,27 @@ export default function Home() {
         {/* LEFT */}
         <div className="lg:col-span-7 space-y-6 text-left">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 text-[11px] font-semibold text-indigo-600 uppercase tracking-wider">
-            <Sparkles className="w-3 h-3" /> White Label — Inteligência de Vendas B2B
+            <Sparkles className="w-3 h-3" />
+            White Label — Inteligência de Vendas B2B
           </div>
 
           <h1 className="text-4xl sm:text-5xl md:text-6xl font-light text-neutral-950 tracking-tight leading-[1.15]">
-            A Inteligência Artificial faz a análise. <br />
-            <span className="font-semibold text-indigo-600">Sua equipe toma as melhores decisões.</span> <br />
+            A Inteligência Artificial faz a análise.
+            <br />
+
+            <span className="font-semibold text-indigo-600">
+              Sua equipe toma as melhores decisões.
+            </span>
+
+            <br />
             O resultado aparece no faturamento.
           </h1>
 
           <p className="text-lg text-neutral-500 font-normal leading-relaxed max-w-xl">
-            Conecte equipes com clientes e leads. Combine inteligência, atendimento humano e um CRM que organiza seu fluxo comercial. Uma tecnologia robusta desenhada para sustentar o crescimento do seu negócio.
+            Conecte equipes com clientes e leads. Combine inteligência,
+            atendimento humano e um CRM que organiza seu fluxo comercial.
+            Uma tecnologia robusta desenhada para sustentar o crescimento
+            do seu negócio.
           </p>
         </div>
 
@@ -133,15 +173,23 @@ export default function Home() {
 
           <div className="text-left space-y-2 mb-6">
             <h3 className="text-xl font-bold text-neutral-950 tracking-tight">
-              {isLogin ? 'Mirra CRM Workspace' : 'Cadastre sua Empresa'}
+              {isLogin
+                ? 'Mirra CRM Workspace'
+                : 'Cadastre sua Empresa'}
             </h3>
+
             <p className="text-xs text-neutral-400">
-              {isLogin ? 'Insira suas credenciais de acesso' : 'Crie sua conta e comece agora mesmo'}
+              {isLogin
+                ? 'Insira suas credenciais de acesso'
+                : 'Crie sua conta e comece agora mesmo'}
             </p>
           </div>
 
           {error && (
-            <div className="p-3 mb-4 bg-rose-50 border border-rose-200 text-rose-600 rounded-xl text-xs font-semibold text-center">
+            <div
+              role="alert"
+              className="p-3 mb-4 bg-rose-50 border border-rose-200 text-rose-600 rounded-xl text-xs font-semibold text-center"
+            >
               {error}
             </div>
           )}
@@ -149,14 +197,24 @@ export default function Home() {
           <form onSubmit={handleSubmit} className="space-y-4">
             {!isLogin && (
               <div>
-                <label className="text-[11px] font-bold text-neutral-400 uppercase tracking-wider">Nome Completo</label>
+                <label
+                  htmlFor="register-name"
+                  className="text-[11px] font-bold text-neutral-400 uppercase tracking-wider"
+                >
+                  Nome Completo
+                </label>
+
                 <div className="relative mt-1.5">
                   <User className="absolute left-3.5 top-3.5 h-4 w-4 text-neutral-400" />
+
                   <input
+                    id="register-name"
                     type="text"
+                    autoComplete="name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Ex: João Silva"
+                    required={!isLogin}
                     className="w-full pl-11 pr-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl text-sm text-neutral-900 focus:outline-none focus:border-indigo-500 focus:bg-white transition-all"
                   />
                 </div>
@@ -164,40 +222,84 @@ export default function Home() {
             )}
 
             <div>
-              <label className="text-[11px] font-bold text-neutral-400 uppercase tracking-wider">Endereço de E-mail</label>
+              <label
+                htmlFor="login-email"
+                className="text-[11px] font-bold text-neutral-400 uppercase tracking-wider"
+              >
+                Endereço de E-mail
+              </label>
+
               <div className="relative mt-1.5">
                 <Mail className="absolute left-3.5 top-3.5 h-4 w-4 text-neutral-400" />
+
                 <input
-                  type="text"
+                  id="login-email"
+                  type="email"
+                  autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="seu-email@provedor.com"
+                  required
                   className="w-full pl-11 pr-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl text-sm text-neutral-900 focus:outline-none focus:border-indigo-500 focus:bg-white transition-all"
                 />
               </div>
             </div>
 
             <div>
-              <label className="text-[11px] font-bold text-neutral-400 uppercase tracking-wider">Senha de Segurança</label>
+              <label
+                htmlFor="login-password"
+                className="text-[11px] font-bold text-neutral-400 uppercase tracking-wider"
+              >
+                Senha de Segurança
+              </label>
+
               <div className="relative mt-1.5">
                 <Lock className="absolute left-3.5 top-3.5 h-4 w-4 text-neutral-400" />
+
                 <input
+                  id="login-password"
                   type="password"
+                  autoComplete={
+                    isLogin
+                      ? 'current-password'
+                      : 'new-password'
+                  }
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="******"
+                  required
+                  minLength={6}
                   className="w-full pl-11 pr-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl text-sm text-neutral-900 focus:outline-none focus:border-indigo-500 focus:bg-white transition-all"
                 />
               </div>
             </div>
+
+            {/* RECUPERAÇÃO DE SENHA */}
+            {isLogin && (
+              <div className="flex justify-end">
+                <Link
+                  href="/recuperar-senha"
+                  className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 hover:underline transition-colors"
+                >
+                  Esqueci minha senha
+                </Link>
+              </div>
+            )}
 
             <button
               type="submit"
               disabled={loading}
               className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold text-sm py-3.5 px-4 rounded-full shadow-lg shadow-indigo-100 transition-all mt-6"
             >
-              {loading ? 'Aguarde...' : (isLogin ? 'Entrar no Painel' : 'Finalizar Cadastro')}
-              {!loading && <ArrowRight className="w-4 h-4" />}
+              {loading
+                ? 'Aguarde...'
+                : isLogin
+                  ? 'Entrar no Painel'
+                  : 'Finalizar Cadastro'}
+
+              {!loading && (
+                <ArrowRight className="w-4 h-4" />
+              )}
             </button>
           </form>
 
@@ -210,7 +312,9 @@ export default function Home() {
               }}
               className="text-xs text-neutral-500 hover:text-indigo-600 transition-colors"
             >
-              {isLogin ? 'Não possui uma conta? Cadastre-se' : 'Já possui uma conta? Faça o Login'}
+              {isLogin
+                ? 'Não possui uma conta? Cadastre-se'
+                : 'Já possui uma conta? Faça o Login'}
             </button>
           </div>
         </div>
