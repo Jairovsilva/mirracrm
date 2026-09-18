@@ -1,5 +1,5 @@
 'use client';
- 
+
 import {
   useCallback,
   useEffect,
@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from 'react';
- 
+
 import {
   AlertCircle,
   Check,
@@ -27,21 +27,21 @@ import {
   Wifi,
   WifiOff,
 } from 'lucide-react';
- 
+
 import { useCRMStore } from '@/src/store/crmStore';
 import { useTranslation } from '@/src/lib/useTranslation';
 import { supabase } from '@/src/lib/supabaseClient';
- 
+
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
- 
+
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
- 
+
 interface WhatsAppLead {
   id: string;
   nome: string;
@@ -50,13 +50,13 @@ interface WhatsAppLead {
   stage: string;
   temperatura: string;
 }
- 
+
 interface AssignedProfile {
   id: string;
   name: string;
   email: string;
 }
- 
+
 interface WhatsAppConversation {
   id: string;
   scope_key: string;
@@ -71,15 +71,15 @@ interface WhatsAppConversation {
   last_inbound_at: string | null;
   created_at: string;
   updated_at: string;
- 
+
   leads?: WhatsAppLead | WhatsAppLead[] | null;
- 
+
   profiles?:
     | AssignedProfile
     | AssignedProfile[]
     | null;
 }
- 
+
 interface WhatsAppMessage {
   id: string;
   conversation_id: string;
@@ -88,6 +88,7 @@ interface WhatsAppMessage {
   message_type: string;
   sender_phone: string | null;
   recipient_phone: string | null;
+
   content: string | null;
   media_id: string | null;
   media_url: string | null;
@@ -102,7 +103,7 @@ interface WhatsAppMessage {
   sent_by_user_id: string | null;
   created_at: string;
 }
- 
+
 interface WhatsAppAccount {
   id: string;
   scope_key: string;
@@ -112,12 +113,12 @@ interface WhatsAppAccount {
   verified_name: string | null;
   status: 'active' | 'inactive' | 'error';
 }
- 
+
 interface MetaEmbeddedSignupSession {
   wabaId: string;
   phoneNumberId: string;
 }
- 
+
 interface MetaEmbeddedSignupMessage {
   type?: string;
   event?: string;
@@ -130,30 +131,30 @@ interface MetaEmbeddedSignupMessage {
     errorMessage?: string;
   };
 }
- 
+
 interface MetaLoginResponse {
   authResponse?: {
     code?: string;
   };
   status?: string;
 }
- 
+
 const META_SDK_SCRIPT_ID = 'facebook-jssdk';
 const META_SDK_URL = 'https://connect.facebook.net/en_US/sdk.js';
- 
+
 function getMetaGraphApiVersion(): string {
   const version =
     process.env.NEXT_PUBLIC_WHATSAPP_GRAPH_API_VERSION?.trim();
- 
+
   if (!version) {
     throw new Error(
       'NEXT_PUBLIC_WHATSAPP_GRAPH_API_VERSION não configurado.'
     );
   }
- 
+
   return version;
 }
- 
+
 function loadMetaSdk(appId: string): Promise<any> {
   return new Promise((resolve, reject) => {
     if (typeof window === 'undefined') {
@@ -164,10 +165,10 @@ function loadMetaSdk(appId: string): Promise<any> {
       );
       return;
     }
- 
+
     const initialize = () => {
       const facebook = (window as any).FB;
- 
+
       if (!facebook) {
         reject(
           new Error(
@@ -176,32 +177,33 @@ function loadMetaSdk(appId: string): Promise<any> {
         );
         return;
       }
- 
+
       try {
+
         facebook.init({
           appId,
           cookie: true,
           xfbml: false,
           version: getMetaGraphApiVersion(),
         });
- 
+
         resolve(facebook);
       } catch (sdkError) {
         reject(sdkError);
       }
     };
- 
+
     if ((window as any).FB) {
       initialize();
       return;
     }
- 
+
     const existingScript = document.getElementById(
       META_SDK_SCRIPT_ID
     ) as HTMLScriptElement | null;
- 
+
     (window as any).fbAsyncInit = initialize;
- 
+
     if (existingScript) {
       existingScript.addEventListener('load', initialize, {
         once: true,
@@ -219,7 +221,7 @@ function loadMetaSdk(appId: string): Promise<any> {
       );
       return;
     }
- 
+
     const script = document.createElement('script');
     script.id = META_SDK_SCRIPT_ID;
     script.src = META_SDK_URL;
@@ -233,48 +235,49 @@ function loadMetaSdk(appId: string): Promise<any> {
         )
       );
     };
- 
+
     document.body.appendChild(script);
   });
 }
- 
+
 function getRelationOne<T>(
   relation: T | T[] | null | undefined
 ): T | null {
   if (!relation) {
     return null;
   }
- 
+
   if (Array.isArray(relation)) {
     return relation[0] || null;
   }
- 
+
   return relation;
 }
- 
+
 function formatPhone(
   phone: string | null | undefined
 ): string {
   if (!phone) {
     return '';
   }
- 
+
   const digits = phone.replace(/\D/g, '');
- 
+
   if (
     digits.startsWith('55') &&
     digits.length >= 12
   ) {
     const ddd = digits.slice(2, 4);
     const number = digits.slice(4);
- 
+
+
     if (number.length === 9) {
       return `+55 (${ddd}) ${number.slice(
         0,
         5
       )}-${number.slice(5)}`;
     }
- 
+
     if (number.length === 8) {
       return `+55 (${ddd}) ${number.slice(
         0,
@@ -282,29 +285,29 @@ function formatPhone(
       )}-${number.slice(4)}`;
     }
   }
- 
+
   return `+${digits}`;
 }
- 
+
 function formatConversationDate(
   iso: string | null
 ): string {
   if (!iso) {
     return '';
   }
- 
+
   const date = new Date(iso);
- 
+
   if (Number.isNaN(date.getTime())) {
     return '';
   }
- 
+
   const now = new Date();
- 
+
   const sameDay =
     date.toDateString() ===
     now.toDateString();
- 
+
   if (sameDay) {
     return date.toLocaleTimeString(
       'pt-BR',
@@ -314,7 +317,7 @@ function formatConversationDate(
       }
     );
   }
- 
+
   return date.toLocaleDateString(
     'pt-BR',
     {
@@ -323,16 +326,16 @@ function formatConversationDate(
     }
   );
 }
- 
+
 function formatMessageTime(
   iso: string
 ): string {
   const date = new Date(iso);
- 
+
   if (Number.isNaN(date.getTime())) {
     return '';
   }
- 
+
   return date.toLocaleTimeString(
     'pt-BR',
     {
@@ -341,7 +344,7 @@ function formatMessageTime(
     }
   );
 }
- 
+
 function getMessageStatusIcon(
   status: WhatsAppMessage['status']
 ) {
@@ -350,56 +353,57 @@ function getMessageStatusIcon(
       <CheckCheck className="w-3.5 h-3.5 text-blue-500" />
     );
   }
- 
+
   if (status === 'delivered') {
     return (
       <CheckCheck className="w-3.5 h-3.5 text-muted-foreground" />
     );
   }
- 
+
   if (status === 'sent') {
+
     return (
       <Check className="w-3.5 h-3.5 text-muted-foreground" />
     );
   }
- 
+
   if (status === 'failed') {
     return (
       <AlertCircle className="w-3.5 h-3.5 text-destructive" />
     );
   }
- 
+
   return (
     <Clock className="w-3 h-3 text-muted-foreground" />
   );
 }
- 
+
 export function WhatsAppView() {
   const { t } = useTranslation();
- 
+
   const currentUser = useCRMStore(
     (state) => state.currentUser
   );
- 
+
   const leads = useCRMStore(
     (state) => state.leads
   );
- 
+
   const [account, setAccount] =
     useState<WhatsAppAccount | null>(null);
- 
+
   const [
     conversations,
     setConversations,
   ] = useState<WhatsAppConversation[]>(
     []
   );
- 
+
   const [
     selectedConversationId,
     setSelectedConversationId,
   ] = useState<string | null>(null);
- 
+
   const [messages, setMessages] =
     useState<WhatsAppMessage[]>([]);
   const [sellers, setSellers] = useState<AssignedProfile[]>([]);
@@ -408,43 +412,62 @@ export function WhatsAppView() {
   const selectedIdRef = useRef<string | null>(null);
   const messageSequenceRef = useRef(0);
   const conversationSequenceRef = useRef(0);
- 
+
   const [search, setSearch] =
     useState('');
- 
+
   const [messageText, setMessageText] =
     useState('');
- 
+
   const [loading, setLoading] =
     useState(true);
- 
+
   const [
     loadingMessages,
     setLoadingMessages,
   ] = useState(false);
- 
+
   const [sending, setSending] =
     useState(false);
- 
+
   const [connecting, setConnecting] =
     useState(false);
- 
+
   const [error, setError] =
     useState<string | null>(null);
- 
+
   const messagesEndRef =
     useRef<HTMLDivElement>(null);
- 
- 
+
+
   const embeddedSignupCodeRef =
     useRef<string | null>(null);
- 
+
   const embeddedSignupSessionRef =
     useRef<MetaEmbeddedSignupSession | null>(null);
- 
+
   const completingEmbeddedSignupRef =
     useRef(false);
- 
+
+  // Impede que a interface fique indefinidamente em "Conectando"
+  // quando o popup da Meta fecha ou não devolve callback.
+  const embeddedSignupTimeoutRef =
+
+    useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearEmbeddedSignupTimeout = useCallback(() => {
+    if (embeddedSignupTimeoutRef.current !== null) {
+      clearTimeout(embeddedSignupTimeoutRef.current);
+      embeddedSignupTimeoutRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearEmbeddedSignupTimeout();
+    };
+  }, [clearEmbeddedSignupTimeout]);
+
   const selectedConversation =
     useMemo(
       () =>
@@ -458,20 +481,20 @@ export function WhatsAppView() {
         selectedConversationId,
       ]
     );
- 
+
   const getAccessToken =
     useCallback(async () => {
       const {
         data: sessionData,
       } =
         await supabase.auth.getSession();
- 
+
       return (
         sessionData.session
           ?.access_token || null
       );
     }, []);
- 
+
   const apiFetch =
     useCallback(
       async (
@@ -480,13 +503,13 @@ export function WhatsAppView() {
       ) => {
         const token =
           await getAccessToken();
- 
+
         if (!token) {
           throw new Error(
             'Sessão expirada. Faça login novamente.'
           );
         }
- 
+
         const response = await fetch(
           url,
           {
@@ -500,34 +523,35 @@ export function WhatsAppView() {
             },
           }
         );
- 
+
         const data =
           await response.json();
- 
+
         if (!response.ok) {
           const apiError =
             new Error(
               data?.error ||
                 'Erro na operação.'
             );
- 
+
           (apiError as any).code =
             data?.code;
- 
+
           throw apiError;
         }
- 
+
         return data;
       },
       [getAccessToken]
+
     );
- 
+
   const loadAccount =
     useCallback(async () => {
       if (!currentUser) {
         return;
       }
- 
+
       const {
         data,
         error: accountError,
@@ -540,24 +564,24 @@ export function WhatsAppView() {
         )
         .eq('status', 'active')
         .maybeSingle();
- 
+
       if (accountError) {
         console.error(
           'Erro ao consultar conta WhatsApp:',
           accountError
         );
- 
+
         return;
       }
- 
+
       setAccount(
         (data as WhatsAppAccount) ||
           null
       );
     }, [currentUser]);
- 
+
   const isManager = currentUser?.role === 'owner' || currentUser?.role === 'admin';
- 
+
   const loadSellers = useCallback(async () => {
     if (!isManager) return;
     setLoadingSellers(true);
@@ -570,7 +594,7 @@ export function WhatsAppView() {
       setLoadingSellers(false);
     }
   }, [apiFetch, isManager]);
- 
+
   const loadConversations =
     useCallback(
       async (
@@ -579,11 +603,11 @@ export function WhatsAppView() {
         if (!currentUser) {
           return;
         }
- 
+
         if (!silent) {
           setLoading(true);
         }
- 
+
         const sequence = ++conversationSequenceRef.current;
         try {
           const data =
@@ -591,15 +615,15 @@ export function WhatsAppView() {
               '/api/whatsapp/conversations'
             );
           if (sequence !== conversationSequenceRef.current) return;
- 
+
           const nextConversations =
             (data.conversations ||
               []) as WhatsAppConversation[];
- 
+
           setConversations(
             nextConversations
           );
- 
+
           setSelectedConversationId((current) => {
             const next = current && nextConversations.some((item) => item.id === current)
               ? current
@@ -610,14 +634,15 @@ export function WhatsAppView() {
               setMessages([]);
             }
             return next;
+
           });
- 
+
           setError(null);
         } catch (requestError: any) {
           console.error(
             requestError
           );
- 
+
           if (!silent) {
             setError(
               requestError?.message ||
@@ -635,7 +660,7 @@ export function WhatsAppView() {
         currentUser,
       ]
     );
- 
+
   const loadMessages =
     useCallback(
       async (
@@ -645,13 +670,13 @@ export function WhatsAppView() {
         if (!conversationId) {
           return;
         }
- 
+
         const sequence = ++messageSequenceRef.current;
         if (!silent) {
           setMessages([]);
           setLoadingMessages(true);
         }
- 
+
         try {
           const data =
             await apiFetch(
@@ -660,12 +685,12 @@ export function WhatsAppView() {
               )}`
             );
           if (sequence !== messageSequenceRef.current || selectedIdRef.current !== conversationId) return;
- 
+
           setMessages(
             (data.messages ||
               []) as WhatsAppMessage[]
           );
- 
+
           setConversations(
             (current) =>
               current.map(
@@ -679,7 +704,7 @@ export function WhatsAppView() {
                     : conversation
               )
           );
- 
+
           setError(null);
         } catch (requestError: any) {
           console.error(requestError);
@@ -693,15 +718,16 @@ export function WhatsAppView() {
       },
       [apiFetch]
     );
- 
+
   const completeEmbeddedSignup =
     useCallback(async () => {
       const code =
         embeddedSignupCodeRef.current;
- 
+
       const session =
+
         embeddedSignupSessionRef.current;
- 
+
       if (
         !code ||
         !session ||
@@ -709,9 +735,12 @@ export function WhatsAppView() {
       ) {
         return;
       }
- 
+
       completingEmbeddedSignupRef.current = true;
- 
+      // O backend já vai processar o cadastro: o limite de espera
+      // da janela da Meta não deve interromper essa operação.
+      clearEmbeddedSignupTimeout();
+
       try {
         await apiFetch(
           '/api/whatsapp/embedded-signup/complete',
@@ -725,17 +754,17 @@ export function WhatsAppView() {
             }),
           }
         );
- 
+
         await loadAccount();
         await loadConversations();
- 
+
         setError(null);
       } catch (signupError: any) {
         console.error(
           'Erro ao concluir Embedded Signup:',
           signupError
         );
- 
+
         setError(
           signupError?.message ||
             'Não foi possível concluir a conexão do WhatsApp Business.'
@@ -751,7 +780,7 @@ export function WhatsAppView() {
       loadAccount,
       loadConversations,
     ]);
- 
+
   useEffect(() => {
     const handleEmbeddedSignupMessage = (
       event: MessageEvent
@@ -764,9 +793,9 @@ export function WhatsAppView() {
       ) {
         return;
       }
- 
+
       let payload: MetaEmbeddedSignupMessage;
- 
+
       try {
         payload =
           typeof event.data === 'string'
@@ -775,7 +804,7 @@ export function WhatsAppView() {
       } catch {
         return;
       }
- 
+
       if (
         !payload ||
         payload.type !==
@@ -783,10 +812,11 @@ export function WhatsAppView() {
       ) {
         return;
       }
- 
+
       const signupEvent =
         String(payload.event || '');
- 
+
+
       if (
         signupEvent === 'FINISH' ||
         signupEvent ===
@@ -797,124 +827,141 @@ export function WhatsAppView() {
             payload.data?.wabaId ||
             ''
         ).trim();
- 
+
         const phoneNumberId = String(
           payload.data?.phone_number_id ||
             payload.data?.phoneNumberId ||
             ''
         ).trim();
- 
+
         if (!wabaId || !phoneNumberId) {
+          clearEmbeddedSignupTimeout();
           setConnecting(false);
           setError(
             'A Meta concluiu o cadastro, mas não retornou os identificadores da conta do WhatsApp.'
           );
           return;
         }
- 
+
         embeddedSignupSessionRef.current = {
           wabaId,
           phoneNumberId,
         };
- 
+        // FINISH pode chegar antes do callback de FB.login.
+        // Nesse caso, completeEmbeddedSignup aguardará o código.
+
+
         void completeEmbeddedSignup();
         return;
       }
- 
+
       if (
         signupEvent === 'CANCEL' ||
         signupEvent === 'ERROR'
       ) {
+        clearEmbeddedSignupTimeout();
         embeddedSignupCodeRef.current = null;
         embeddedSignupSessionRef.current = null;
         completingEmbeddedSignupRef.current = false;
         setConnecting(false);
- 
+
         if (signupEvent === 'ERROR') {
           setError(
             payload.data?.error_message ||
               payload.data?.errorMessage ||
               'A Meta informou um erro durante a conexão do WhatsApp Business.'
           );
+        } else {
+          setError('A conexão foi cancelada na janela da Meta. Tente novamente quando estiver pronto.');
         }
       }
     };
- 
+
     window.addEventListener(
       'message',
       handleEmbeddedSignupMessage
     );
- 
+
     return () => {
       window.removeEventListener(
         'message',
         handleEmbeddedSignupMessage
       );
     };
-  }, [completeEmbeddedSignup]);
- 
+  }, [clearEmbeddedSignupTimeout, completeEmbeddedSignup]);
+
   const handleEmbeddedSignup =
     useCallback(async () => {
       if (connecting) {
         return;
       }
- 
+
       const appId =
         process.env.NEXT_PUBLIC_META_APP_ID?.trim();
- 
+
       const configId =
         process.env
           .NEXT_PUBLIC_WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID?.trim();
- 
+
       if (!appId || !configId) {
         setError(
           'As configurações públicas do Embedded Signup não estão disponíveis neste ambiente.'
         );
+
         return;
       }
- 
+
       try {
         // Valida antes de abrir o fluxo para evitar
         // um popup que nunca poderia ser concluído.
         getMetaGraphApiVersion();
- 
+
+        clearEmbeddedSignupTimeout();
         setConnecting(true);
         setError(null);
- 
+
+        // A Meta nem sempre chama o callback quando bloqueia a URL
+        // ou a janela é fechada. Após 2 minutos, libera o botão.
+        embeddedSignupTimeoutRef.current = setTimeout(() => {
+          if (completingEmbeddedSignupRef.current) return;
+          embeddedSignupCodeRef.current = null;
+          embeddedSignupSessionRef.current = null;
+          setConnecting(false);
+          setError(
+            'A Meta não concluiu a autorização em até 2 minutos. Verifique se a janela mostrou algum erro, feche-a e tente novamente.'
+          );
+          embeddedSignupTimeoutRef.current = null;
+        }, 120000);
+
         embeddedSignupCodeRef.current = null;
         embeddedSignupSessionRef.current = null;
         completingEmbeddedSignupRef.current = false;
- 
+
         const facebook =
           await loadMetaSdk(appId);
- 
+
         facebook.login(
           (response: MetaLoginResponse) => {
             const code = String(
               response?.authResponse?.code ||
                 ''
             ).trim();
- 
+
             if (!code) {
+              clearEmbeddedSignupTimeout();
               embeddedSignupCodeRef.current = null;
               embeddedSignupSessionRef.current = null;
               completingEmbeddedSignupRef.current = false;
               setConnecting(false);
- 
-              if (
-                response?.status &&
-                response.status !== 'unknown'
-              ) {
-                setError(
-                  'A Meta não retornou o código de autorização necessário para concluir a conexão.'
-                );
-              }
- 
+
+              setError(
+                'A autorização foi cancelada, bloqueada ou não retornou o código necessário. Confira a mensagem na janela da Meta antes de tentar novamente.'
+              );
               return;
             }
- 
+
             embeddedSignupCodeRef.current = code;
- 
+
             void completeEmbeddedSignup();
           },
           {
@@ -934,22 +981,25 @@ export function WhatsAppView() {
           'Erro ao abrir Embedded Signup:',
           signupError
         );
- 
+
+        clearEmbeddedSignupTimeout();
         embeddedSignupCodeRef.current = null;
         embeddedSignupSessionRef.current = null;
         completingEmbeddedSignupRef.current = false;
         setConnecting(false);
- 
+
         setError(
           signupError?.message ||
             'Não foi possível abrir a conexão com a Meta.'
         );
       }
     }, [
+      clearEmbeddedSignupTimeout,
       completeEmbeddedSignup,
       connecting,
     ]);
- 
+
+
   const handleAssign = useCallback(async (assignedUserId: string) => {
     const id = selectedIdRef.current;
     if (!isManager || !id || assigning) return;
@@ -967,7 +1017,7 @@ export function WhatsAppView() {
       setAssigning(false);
     }
   }, [apiFetch, assigning, isManager, loadConversations]);
- 
+
   const handleSend =
     useCallback(async () => {
       if (
@@ -977,13 +1027,13 @@ export function WhatsAppView() {
       ) {
         return;
       }
- 
+
       const content =
         messageText.trim();
- 
+
       setSending(true);
       setError(null);
- 
+
       try {
         await apiFetch(
           '/api/whatsapp/send',
@@ -996,14 +1046,14 @@ export function WhatsAppView() {
             }),
           }
         );
- 
+
         setMessageText('');
- 
+
         await loadMessages(
           selectedConversationId,
           true
         );
- 
+
         await loadConversations(
           true
         );
@@ -1032,19 +1082,20 @@ export function WhatsAppView() {
       selectedConversationId,
       sending,
     ]);
- 
+
   useEffect(() => {
     if (!currentUser) {
       return;
     }
- 
+
     const initialize =
+
       async () => {
         await loadAccount();
         await loadConversations();
         if (isManager) await loadSellers();
       };
- 
+
     void initialize();
   }, [
     currentUser,
@@ -1053,7 +1104,7 @@ export function WhatsAppView() {
     isManager,
     loadSellers,
   ]);
- 
+
   useEffect(() => {
     selectedIdRef.current = selectedConversationId;
     messageSequenceRef.current += 1;
@@ -1063,7 +1114,7 @@ export function WhatsAppView() {
       setMessages([]);
       return;
     }
- 
+
     loadMessages(
       selectedConversationId
     );
@@ -1071,7 +1122,7 @@ export function WhatsAppView() {
     selectedConversationId,
     loadMessages,
   ]);
- 
+
   /*
    * Supabase Realtime.
    *
@@ -1083,7 +1134,7 @@ export function WhatsAppView() {
     if (!currentUser) {
       return;
     }
- 
+
     const channel =
       supabase
         .channel(
@@ -1119,7 +1170,7 @@ export function WhatsAppView() {
                 ?.conversation_id ||
               payload?.old
                 ?.conversation_id;
- 
+
             if (
               conversationId &&
               conversationId ===
@@ -1129,13 +1180,14 @@ export function WhatsAppView() {
                 conversationId,
                 true
               );
+
             }
- 
+
             loadConversations(true);
           }
         )
         .subscribe();
- 
+
     return () => {
       supabase.removeChannel(
         channel
@@ -1147,7 +1199,7 @@ export function WhatsAppView() {
     loadMessages,
     selectedConversationId,
   ]);
- 
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView(
       {
@@ -1155,30 +1207,30 @@ export function WhatsAppView() {
       }
     );
   }, [messages]);
- 
+
   const filteredConversations =
     useMemo(() => {
       const term =
         search
           .trim()
           .toLowerCase();
- 
+
       if (!term) {
         return conversations;
       }
- 
+
       return conversations.filter(
         (conversation) => {
           const lead =
             getRelationOne(
               conversation.leads
             );
- 
+
           const seller =
             getRelationOne(
               conversation.profiles
             );
- 
+
           return [
             conversation.contact_name,
             conversation.phone_number,
@@ -1199,7 +1251,7 @@ export function WhatsAppView() {
       conversations,
       search,
     ]);
- 
+
   const totalUnread =
     conversations.reduce(
       (sum, conversation) =>
@@ -1208,24 +1260,25 @@ export function WhatsAppView() {
           0),
       0
     );
- 
+
   const openConversations =
     conversations.filter(
       (conversation) =>
         conversation.status ===
         'open'
     ).length;
- 
+
   const selectedLead =
     getRelationOne(
       selectedConversation?.leads
+
     );
- 
+
   const selectedSeller =
     getRelationOne(
       selectedConversation?.profiles
     );
- 
+
   const canSendFreeText =
     (() => {
       if (
@@ -1234,12 +1287,12 @@ export function WhatsAppView() {
       ) {
         return false;
       }
- 
+
       const lastInbound =
         new Date(
           selectedConversation.last_inbound_at
         ).getTime();
- 
+
       if (
         Number.isNaN(
           lastInbound
@@ -1247,14 +1300,14 @@ export function WhatsAppView() {
       ) {
         return false;
       }
- 
+
       return (
         Date.now() -
           lastInbound <=
         24 * 60 * 60 * 1000
       );
     })();
- 
+
   return (
     <div className="p-4 md:p-6 max-w-[1800px] mx-auto space-y-5 animate-fade-in">
       {/* HEADER */}
@@ -1263,27 +1316,27 @@ export function WhatsAppView() {
           <div className="w-11 h-11 rounded-xl bg-emerald-500/10 flex items-center justify-center">
             <MessageCircle className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
           </div>
- 
+
           <div>
             <h1 className="text-2xl font-bold">
               {t.whatsapp.title}
             </h1>
- 
+
             <p className="text-sm text-muted-foreground">
               {t.whatsapp.subtitle}
             </p>
           </div>
         </div>
- 
+
         <div className="flex flex-wrap items-center gap-2">
           {account ? (
             <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 text-sm">
               <Wifi className="w-4 h-4 text-emerald-500" />
- 
+
               <span className="font-semibold text-emerald-600 dark:text-emerald-400">
                 Conectado
               </span>
- 
+
               {account.display_phone_number && (
                 <span className="text-muted-foreground">
                   {
@@ -1295,11 +1348,11 @@ export function WhatsAppView() {
           ) : (
             <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-card text-sm">
               <WifiOff className="w-4 h-4 text-amber-500" />
- 
+
               <span className="text-muted-foreground">
                 {t.whatsapp.status}:
               </span>
- 
+
               <span className="font-semibold">
                 {
                   t.whatsapp
@@ -1308,7 +1361,8 @@ export function WhatsAppView() {
               </span>
             </div>
           )}
- 
+
+
           <Button
             type="button"
             variant="outline"
@@ -1328,7 +1382,7 @@ export function WhatsAppView() {
             />
             Atualizar
           </Button>
- 
+
           {!account &&
             (currentUser?.role ===
               'owner' ||
@@ -1349,28 +1403,28 @@ export function WhatsAppView() {
                 ) : (
                   <Settings2 className="w-4 h-4 mr-2" />
                 )}
- 
+
                 Conectar WhatsApp Business
               </Button>
             )}
         </div>
       </div>
- 
+
       {/* ERRO */}
       {error && (
         <div className="flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
           <AlertCircle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
- 
+
           <div className="flex-1">
             <p className="text-sm font-semibold text-destructive">
               Atenção
             </p>
- 
+
             <p className="text-sm text-muted-foreground mt-1">
               {error}
             </p>
           </div>
- 
+
           <button
             type="button"
             onClick={() =>
@@ -1382,7 +1436,7 @@ export function WhatsAppView() {
           </button>
         </div>
       )}
- 
+
       {/* KPIs */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <Card>
@@ -1392,19 +1446,20 @@ export function WhatsAppView() {
                 <p className="text-xs text-muted-foreground uppercase font-medium">
                   Conversas abertas
                 </p>
- 
+
                 <p className="text-2xl font-bold mt-2">
                   {openConversations}
                 </p>
               </div>
- 
+
               <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+
                 <Inbox className="w-5 h-5 text-primary" />
               </div>
             </div>
           </CardContent>
         </Card>
- 
+
         <Card>
           <CardContent className="p-5">
             <div className="flex items-center justify-between">
@@ -1412,19 +1467,19 @@ export function WhatsAppView() {
                 <p className="text-xs text-muted-foreground uppercase font-medium">
                   Não lidas
                 </p>
- 
+
                 <p className="text-2xl font-bold mt-2">
                   {totalUnread}
                 </p>
               </div>
- 
+
               <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center">
                 <MessageCircle className="w-5 h-5 text-amber-500" />
               </div>
             </div>
           </CardContent>
         </Card>
- 
+
         <Card>
           <CardContent className="p-5">
             <div className="flex items-center justify-between">
@@ -1432,19 +1487,19 @@ export function WhatsAppView() {
                 <p className="text-xs text-muted-foreground uppercase font-medium">
                   Leads no CRM
                 </p>
- 
+
                 <p className="text-2xl font-bold mt-2">
                   {leads.length}
                 </p>
               </div>
- 
+
               <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
                 <Users className="w-5 h-5 text-blue-500" />
               </div>
             </div>
           </CardContent>
         </Card>
- 
+
         <Card>
           <CardContent className="p-5">
             <div className="flex items-center justify-between">
@@ -1452,14 +1507,14 @@ export function WhatsAppView() {
                 <p className="text-xs text-muted-foreground uppercase font-medium">
                   WhatsApp
                 </p>
- 
+
                 <p className="text-sm font-semibold mt-2">
                   {account
                     ? 'Ativo'
                     : 'Aguardando conexão'}
                 </p>
               </div>
- 
+
               <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center">
                 <Smartphone className="w-5 h-5 text-emerald-500" />
               </div>
@@ -1467,7 +1522,7 @@ export function WhatsAppView() {
           </CardContent>
         </Card>
       </div>
- 
+
       {/* INBOX */}
       <div className="grid grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)] gap-4 h-[calc(100vh-310px)] min-h-[600px]">
         {/* CONVERSAS */}
@@ -1477,10 +1532,10 @@ export function WhatsAppView() {
               <MessageCircle className="w-4 h-4" />
               Conversas
             </CardTitle>
- 
+
             <div className="relative pt-2">
               <Search className="absolute left-3 top-[22px] w-4 h-4 text-muted-foreground" />
- 
+
               <Input
                 value={search}
                 onChange={(event) =>
@@ -1489,11 +1544,12 @@ export function WhatsAppView() {
                   )
                 }
                 placeholder="Buscar conversa..."
+
                 className="pl-9"
               />
             </div>
           </CardHeader>
- 
+
           <CardContent className="p-0 flex-1 overflow-y-auto">
             {loading ? (
               <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
@@ -1508,11 +1564,11 @@ export function WhatsAppView() {
                 <div className="w-14 h-14 rounded-full bg-secondary flex items-center justify-center mb-4">
                   <Inbox className="w-6 h-6 text-muted-foreground" />
                 </div>
- 
+
                 <p className="text-sm font-semibold">
                   Nenhuma conversa
                 </p>
- 
+
                 <p className="text-xs text-muted-foreground mt-2">
                   As conversas recebidas pelo WhatsApp aparecerão aqui.
                 </p>
@@ -1524,11 +1580,11 @@ export function WhatsAppView() {
                     getRelationOne(
                       conversation.leads
                     );
- 
+
                   const active =
                     conversation.id ===
                     selectedConversationId;
- 
+
                   return (
                     <button
                       key={
@@ -1551,7 +1607,7 @@ export function WhatsAppView() {
                         <div className="w-11 h-11 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0">
                           <User className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                         </div>
- 
+
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between gap-2">
                             <p className="text-sm font-semibold truncate">
@@ -1561,30 +1617,31 @@ export function WhatsAppView() {
                                   conversation.phone_number
                                 )}
                             </p>
- 
+
                             <span className="text-[10px] text-muted-foreground shrink-0">
                               {formatConversationDate(
                                 conversation.last_message_at
                               )}
                             </span>
                           </div>
- 
+
                           <div className="flex items-center gap-2 mt-1">
                             <p className="text-xs text-muted-foreground truncate flex-1">
                               {conversation.last_message_preview ||
                                 'Nova conversa'}
                             </p>
- 
+
                             {conversation.unread_count >
                               0 && (
                               <span className="min-w-5 h-5 px-1 rounded-full bg-emerald-500 text-white text-[10px] font-bold flex items-center justify-center">
                                 {
+
                                   conversation.unread_count
                                 }
                               </span>
                             )}
                           </div>
- 
+
                           {lead?.nome_empresa && (
                             <p className="text-[10px] text-muted-foreground mt-1 truncate">
                               {
@@ -1601,7 +1658,7 @@ export function WhatsAppView() {
             )}
           </CardContent>
         </Card>
- 
+
         {/* CHAT */}
         <Card className="overflow-hidden flex flex-col">
           {!selectedConversation ? (
@@ -1609,15 +1666,15 @@ export function WhatsAppView() {
               <div className="w-20 h-20 rounded-3xl bg-emerald-500/10 flex items-center justify-center">
                 <Smartphone className="w-9 h-9 text-emerald-500" />
               </div>
- 
+
               <h2 className="text-xl font-bold mt-6">
                 Central WhatsApp
               </h2>
- 
+
               <p className="text-sm text-muted-foreground mt-2 max-w-md">
                 Selecione uma conversa para visualizar o histórico e atender o cliente sem sair do MirraCRM.
               </p>
- 
+
               {!account && (
                 <div className="mt-6 inline-flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
                   <WifiOff className="w-4 h-4" />
@@ -1633,7 +1690,7 @@ export function WhatsAppView() {
                   <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center">
                     <User className="w-5 h-5 text-emerald-500" />
                   </div>
- 
+
                   <div className="min-w-0">
                     <p className="font-semibold truncate">
                       {selectedLead?.nome ||
@@ -1642,19 +1699,19 @@ export function WhatsAppView() {
                           selectedConversation.phone_number
                         )}
                     </p>
- 
+
                     <p className="text-xs text-muted-foreground truncate">
                       {formatPhone(
                         selectedConversation.phone_number
                       )}
- 
+
                       {selectedLead?.nome_empresa
                         ? ` • ${selectedLead.nome_empresa}`
                         : ''}
                     </p>
                   </div>
                 </div>
- 
+
                 <div className="flex items-center gap-2 min-w-0">
                   {isManager && (
                     <label className="flex flex-col gap-1 text-xs min-w-0">
@@ -1669,6 +1726,7 @@ export function WhatsAppView() {
                         <option value="">Sem responsável</option>
                         {sellers.map((seller) => (
                           <option key={seller.id} value={seller.id}>
+
                             {seller.name || seller.email}
                           </option>
                         ))}
@@ -1680,7 +1738,7 @@ export function WhatsAppView() {
                       <p className="text-[10px] text-muted-foreground uppercase">
                         Responsável
                       </p>
- 
+
                       <p className="text-xs font-semibold">
                         {
                           selectedSeller.name
@@ -1688,13 +1746,13 @@ export function WhatsAppView() {
                       </p>
                     </div>
                   )}
- 
+
                   <div className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center">
                     {assigning ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4 text-muted-foreground" />}
                   </div>
                 </div>
               </div>
- 
+
               {/* MENSAGENS */}
               <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5 bg-secondary/10">
                 {loadingMessages ? (
@@ -1704,7 +1762,7 @@ export function WhatsAppView() {
                 ) : messages.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
                     <MessageCircle className="w-9 h-9 opacity-30" />
- 
+
                     <p className="text-sm mt-3">
                       Nenhuma mensagem registrada.
                     </p>
@@ -1716,7 +1774,7 @@ export function WhatsAppView() {
                         const outbound =
                           message.direction ===
                           'outbound';
- 
+
                         return (
                           <div
                             key={
@@ -1739,7 +1797,7 @@ export function WhatsAppView() {
                                 {message.content ||
                                   `[${message.message_type}]`}
                               </p>
- 
+
                               <div
                                 className={`flex items-center justify-end gap-1.5 mt-1 ${
                                   outbound
@@ -1752,18 +1810,19 @@ export function WhatsAppView() {
                                     message.created_at
                                   )}
                                 </span>
- 
+
                                 {outbound &&
                                   getMessageStatusIcon(
                                     message.status
                                   )}
                               </div>
                             </div>
+
                           </div>
                         );
                       }
                     )}
- 
+
                     <div
                       ref={
                         messagesEndRef
@@ -1772,14 +1831,14 @@ export function WhatsAppView() {
                   </div>
                 )}
               </div>
- 
+
               {/* JANELA 24 HORAS */}
               {!canSendFreeText && (
                 <div className="px-4 py-2.5 border-t border-amber-500/20 bg-amber-500/5 text-xs text-amber-700 dark:text-amber-400">
                   A janela de atendimento de 24 horas não está aberta. O envio de texto livre fica bloqueado; posteriormente adicionaremos templates aprovados.
                 </div>
               )}
- 
+
               {/* COMPOSER */}
               <div className="p-4 border-t border-border bg-card shrink-0">
                 <div className="flex items-end gap-2">
@@ -1820,7 +1879,7 @@ export function WhatsAppView() {
                     rows={1}
                     className="flex-1 min-h-[44px] max-h-32 resize-none rounded-xl border border-input bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
                   />
- 
+
                   <Button
                     type="button"
                     size="icon"
@@ -1842,15 +1901,15 @@ export function WhatsAppView() {
                     )}
                   </Button>
                 </div>
- 
+
                 <p className="text-[10px] text-muted-foreground mt-2">
                   Enter envia • Shift + Enter cria uma nova linha
                 </p>
               </div>
             </>
           )}
+
         </Card>
       </div>
     </div>
   );
-}
