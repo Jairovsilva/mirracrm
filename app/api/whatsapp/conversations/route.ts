@@ -20,20 +20,18 @@ export async function GET(
       return NextResponse.json(
         {
           ok: false,
-          error:
-            'Sessão inválida.',
+          error: 'Sessão inválida.',
         },
         { status: 401 }
       );
     }
 
-    const {
-      data,
-      error,
-    } = await requester.client
-      .from(
-        'whatsapp_conversations'
-      )
+    const isManager =
+      requester.role === 'owner' ||
+      requester.role === 'admin';
+
+    let query = requester.client
+      .from('whatsapp_conversations')
       .select(`
         id,
         scope_key,
@@ -65,14 +63,29 @@ export async function GET(
       .eq(
         'scope_key',
         requester.scopeKey
-      )
-      .order(
-        'last_message_at',
-        {
-          ascending: false,
-          nullsFirst: false,
-        }
       );
+
+    // Proprietários e administradores visualizam
+    // todas as conversas do próprio ambiente.
+    // Vendedores visualizam somente as conversas
+    // atribuídas a eles.
+    if (!isManager) {
+      query = query.eq(
+        'assigned_user_id',
+        requester.userId
+      );
+    }
+
+    const {
+      data,
+      error,
+    } = await query.order(
+      'last_message_at',
+      {
+        ascending: false,
+        nullsFirst: false,
+      }
+    );
 
     if (error) {
       console.error(
@@ -83,8 +96,7 @@ export async function GET(
       return NextResponse.json(
         {
           ok: false,
-          error:
-            error.message,
+          error: error.message,
         },
         { status: 400 }
       );
@@ -92,10 +104,14 @@ export async function GET(
 
     return NextResponse.json({
       ok: true,
-      conversations:
-        data || [],
+      conversations: data || [],
     });
   } catch (error: any) {
+    console.error(
+      'Erro inesperado ao carregar conversas:',
+      error
+    );
+
     return NextResponse.json(
       {
         ok: false,
