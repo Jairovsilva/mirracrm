@@ -48,6 +48,10 @@ export async function GET(
       );
     }
 
+    /*
+     * Buscar a conversa exclusivamente
+     * dentro do ambiente do usuário.
+     */
     const {
       data: conversation,
       error: conversationError,
@@ -61,6 +65,10 @@ export async function GET(
       .eq(
         'id',
         conversationId
+      )
+      .eq(
+        'scope_key',
+        requester.scopeKey
       )
       .single();
 
@@ -81,7 +89,7 @@ export async function GET(
     /*
      * AUTORIZAÇÃO:
      *
-     * Proprietário e administradores podem
+     * Proprietários e administradores podem
      * acessar todas as conversas do
      * próprio ambiente.
      *
@@ -115,6 +123,13 @@ export async function GET(
       );
     }
 
+    /*
+     * Buscar mensagens somente depois
+     * de confirmar a autorização.
+     *
+     * O filtro por scope_key reforça
+     * o isolamento entre ambientes.
+     */
     const {
       data: messages,
       error: messagesError,
@@ -142,6 +157,10 @@ export async function GET(
         'conversation_id',
         conversationId
       )
+      .eq(
+        'scope_key',
+        requester.scopeKey
+      )
       .order(
         'created_at',
         {
@@ -162,6 +181,7 @@ export async function GET(
 
     /*
      * Marcação de "lido no CRM".
+     *
      * Usamos service_role porque usuários
      * não possuem UPDATE direto por RLS.
      *
