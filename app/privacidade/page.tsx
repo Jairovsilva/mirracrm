@@ -93,7 +93,7 @@ export default function PrivacyPolicyPage() {
 
           <p>
             Responsável identificado pelo MirraCRM:
-            <strong> Jairo Vieira da Silva</strong>.
+            <strong> José Carlos Vignola</strong>.
           </p>
 
           <p>
@@ -572,7 +572,7 @@ export default function PrivacyPolicyPage() {
           <p>
             <strong>MirraCRM</strong>
             <br />
-            Responsável: Jairo Vieira da Silva
+            Responsável: José Carlos Vignola
             <br />
             E-mail:{' '}
             <a href={`mailto:${contactEmail}`}>
