@@ -772,8 +772,7 @@ export const useCRMStore = create<CRMState>()((set, get) => {
             error: 'Sessão expirada. Faça login novamente.',
           };
         }
- 
-        const response = await fetch('/api/invite', {
+ const response = await fetch('/api/team/invite', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
