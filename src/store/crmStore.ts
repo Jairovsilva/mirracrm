@@ -1,5 +1,5 @@
 'use client';
-
+ 
 /**
  * MirraCRM — Store v4.3 (Supabase — persistência real entre navegadores/dispositivos)
  * - Correção do bug de latência de sessão no cadastro (Erro 42501 - RLS) utilizando setSession explícito.
@@ -741,33 +741,69 @@ export const useCRMStore = create<CRMState>()((set, get) => {
  
     inviteTeamMember: async (email, name, role, password) => {
       const { currentUser } = get();
-      if (!currentUser) return { ok: false, error: 'Não autenticado.' };
  
-      const clean = email.toLowerCase().trim();
-      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-        email: clean,
-        password,
-      });
- 
-      if (signUpError || !signUpData.user) {
-        return { ok: false, error: friendlyError(signUpError?.message) };
+      if (!currentUser) {
+        return { ok: false, error: 'Não autenticado.' };
       }
  
-      const { error: profileError } = await supabase.from('profiles').upsert({
-        id: signUpData.user.id,
-        email: clean,
-        name: name.trim(),
-        role,
-        account_type: currentUser.accountType,
-        scope_key: currentUser.scopeKey,
-        company_name: currentUser.companyName,
-      });
- 
-      if (profileError) {
-        return { ok: false, error: friendlyError(profileError.message) };
+      if (currentUser.role !== 'owner' && currentUser.role !== 'admin') {
+        return {
+          ok: false,
+          error: 'Apenas proprietários e administradores podem convidar usuários.',
+        };
       }
  
-      return { ok: true };
+      if (role !== 'vendedor') {
+        return {
+          ok: false,
+          error: 'Nesta etapa, novos integrantes são cadastrados como vendedores.',
+        };
+      }
+ 
+      try {
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
+ 
+        if (sessionError || !session?.access_token) {
+          return {
+            ok: false,
+            error: 'Sessão expirada. Faça login novamente.',
+          };
+        }
+ 
+        const response = await fetch('/api/invite', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            email: email.trim().toLowerCase(),
+            name: name.trim(),
+            password,
+          }),
+        });
+ 
+        const result = await response.json();
+ 
+        if (!response.ok || !result.ok) {
+          return {
+            ok: false,
+            error: result.error || 'Não foi possível convidar o usuário.',
+          };
+        }
+ 
+        return { ok: true };
+      } catch (error) {
+        console.error('Erro ao convidar integrante:', error);
+ 
+        return {
+          ok: false,
+          error: 'Falha de conexão. Tente novamente.',
+        };
+      }
     },
   };
 });
