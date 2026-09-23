@@ -55,15 +55,13 @@ export async function POST(
   /*
    * TRAVA PRINCIPAL.
    *
-   * Mesmo que as credenciais sejam
-   * configuradas acidentalmente,
-   * o processamento financeiro somente
-   * poderá iniciar quando esta variável
-   * for explicitamente habilitada.
+   * Mesmo que as credenciais do Mercado Pago
+   * sejam configuradas, o webhook financeiro
+   * só funciona quando esta variável estiver
+   * explicitamente definida como "true".
    */
   if (
-    process.env
-      .MERCADO_PAGO_WEBHOOK_ENABLED !==
+    process.env.MERCADO_PAGO_WEBHOOK_ENABLED !==
     'true'
   ) {
     return NextResponse.json(
@@ -79,8 +77,7 @@ export async function POST(
   }
 
   const secret =
-    process.env
-      .MERCADO_PAGO_WEBHOOK_SECRET || '';
+    process.env.MERCADO_PAGO_WEBHOOK_SECRET || '';
 
   if (!secret) {
     return NextResponse.json(
@@ -97,7 +94,8 @@ export async function POST(
 
   try {
     /*
-     * 1. DADOS DA NOTIFICAÇÃO
+     * 1. DADOS UTILIZADOS NA VALIDAÇÃO
+     *    DA ASSINATURA DO MERCADO PAGO.
      */
     const signatureHeader =
       request.headers.get('x-signature');
@@ -111,7 +109,8 @@ export async function POST(
       );
 
     /*
-     * 2. AUTENTICIDADE
+     * 2. VALIDAR A AUTENTICIDADE
+     *    DA NOTIFICAÇÃO.
      */
     const validSignature =
       validateMercadoPagoWebhookSignature({
@@ -147,8 +146,7 @@ export async function POST(
     }
 
     /*
-     * 3. LER O BODY APÓS VALIDAR
-     *    A ORIGEM.
+     * 3. LER O PAYLOAD.
      */
     let body: any;
 
@@ -167,8 +165,8 @@ export async function POST(
     }
 
     /*
-     * Aceitamos neste pipeline apenas
-     * notificações referentes a payment.
+     * 4. ESTE PIPELINE PROCESSA
+     *    SOMENTE EVENTOS DE PAYMENT.
      */
     if (
       body?.type !== 'payment' ||
@@ -190,8 +188,8 @@ export async function POST(
     }
 
     /*
-     * 4. O ID DA NOTIFICAÇÃO SERÁ NOSSA
-     *    CHAVE DE IDEMPOTÊNCIA DO WEBHOOK.
+     * 5. IDENTIFICADOR ÚNICO
+     *    DA NOTIFICAÇÃO.
      */
     const providerEventId =
       String(body?.id || '').trim();
@@ -212,11 +210,11 @@ export async function POST(
     const admin = getAdminSupabase();
 
     /*
-     * 5. RESERVAR O EVENTO.
+     * 6. RESERVAR O EVENTO.
      *
-     * A função SQL que já criamos impede
-     * dois workers de processarem o mesmo
-     * evento simultaneamente.
+     * A função SQL controla duplicidade,
+     * concorrência e cria um token exclusivo
+     * para esta tentativa.
      */
     const {
       data: claimRows,
@@ -226,8 +224,10 @@ export async function POST(
       {
         p_provider_event_id:
           providerEventId,
+
         p_event_type:
           String(body.type),
+
         p_resource_id:
           dataId,
       }
@@ -239,9 +239,10 @@ export async function POST(
       );
     }
 
-    const claim = Array.isArray(claimRows)
-      ? claimRows[0]
-      : claimRows;
+    const claim =
+      Array.isArray(claimRows)
+        ? claimRows[0]
+        : claimRows;
 
     if (!claim) {
       throw new Error(
@@ -250,11 +251,9 @@ export async function POST(
     }
 
     /*
-     * Evento já conhecido.
+     * Evento já registrado anteriormente.
      *
-     * Respondemos 200 para o provedor não
-     * insistir desnecessariamente na mesma
-     * notificação.
+     * Não repetimos o processamento.
      */
     if (!claim.should_process) {
       return NextResponse.json(
@@ -273,7 +272,9 @@ export async function POST(
       String(claim.event_id);
 
     const attemptToken =
-      String(claim.attempt_token || '');
+      String(
+        claim.attempt_token || ''
+      );
 
     if (!eventId || !attemptToken) {
       throw new Error(
@@ -283,10 +284,10 @@ export async function POST(
 
     try {
       /*
-       * 6. CONSULTA CANÔNICA.
+       * 7. CONSULTA CANÔNICA DO PAGAMENTO.
        *
-       * Não confiamos no status enviado
-       * pelo webhook.
+       * Não confiamos no status informado
+       * diretamente pelo webhook.
        */
       const payment =
         await getMercadoPagoPayment(
@@ -294,7 +295,8 @@ export async function POST(
         );
 
       /*
-       * 7. external_reference DEVE SER
+       * 8. O external_reference DO
+       *    MERCADO PAGO DEVE CONTER
        *    billing_orders.id.
        */
       const orderId =
@@ -312,7 +314,8 @@ export async function POST(
       }
 
       /*
-       * 8. CARREGAR O PEDIDO REAL.
+       * 9. CARREGAR O PEDIDO REAL
+       *    DO MIRRACRM.
        */
       const {
         data: order,
@@ -348,14 +351,16 @@ export async function POST(
       }
 
       /*
-       * 9. CONCILIAÇÃO.
+       * 10. CONCILIAR PAGAMENTO X PEDIDO.
        *
-       * Aqui são conferidos:
-       * - pagamento aprovado
-       * - BRL
-       * - external_reference
-       * - valor exato
-       * - pedido pendente/processing
+       * A função confere:
+       *
+       * - status approved;
+       * - moeda BRL;
+       * - external_reference;
+       * - valor exato;
+       * - pedido pending/processing;
+       * - provedor Mercado Pago.
        */
       const reconciled =
         reconcileMercadoPagoPayment(
@@ -365,33 +370,42 @@ export async function POST(
 
       /*
        * =================================================
-       * TRAVA FINANCEIRA TEMPORÁRIA
+       * SEGUNDA TRAVA DE SEGURANÇA
        * =================================================
        *
-       * Chegamos até a confirmação segura do pagamento,
-       * mas AINDA NÃO gravamos billing_payments,
-       * NÃO marcamos billing_orders como paid e
-       * NÃO ativamos billing_subscriptions.
-       *
-       * Essa trava será removida somente depois dos
-       * testes com credenciais oficiais do Mercado Pago.
+       * Mesmo com o webhook habilitado,
+       * nenhuma assinatura será ativada enquanto
+       * MERCADO_PAGO_APPLY_PAYMENTS não for "true".
        */
       if (
-        process.env
-          .MERCADO_PAGO_APPLY_PAYMENTS !==
+        process.env.MERCADO_PAGO_APPLY_PAYMENTS !==
         'true'
       ) {
-        await admin.rpc(
+        const {
+          error: disabledFinishError,
+        } = await admin.rpc(
           'finish_billing_webhook_event_v2',
           {
-            p_event_id: eventId,
+            p_event_id:
+              eventId,
+
             p_attempt_token:
               attemptToken,
-            p_success: false,
+
+            p_success:
+              false,
+
             p_error:
               'Pagamento validado, mas aplicação financeira permanece desabilitada.',
           }
         );
+
+        if (disabledFinishError) {
+          console.error(
+            'Falha ao registrar webhook desabilitado:',
+            disabledFinishError
+          );
+        }
 
         return NextResponse.json(
           {
@@ -407,19 +421,106 @@ export async function POST(
       }
 
       /*
-       * NÃO IMPLEMENTAR APLICAÇÃO AQUI AINDA.
+       * 11. APLICAÇÃO FINANCEIRA ATÔMICA.
        *
-       * Esta exceção é proposital.
+       * Chegamos aqui somente depois de:
        *
-       * Mesmo que alguém habilite por engano
-       * MERCADO_PAGO_APPLY_PAYMENTS=true,
-       * não haverá ativação financeira até
-       * instalarmos a próxima etapa.
+       * - assinatura válida;
+       * - consulta direta ao Mercado Pago;
+       * - pagamento approved;
+       * - pedido encontrado;
+       * - external_reference correspondente;
+       * - valor correspondente;
+       * - moeda BRL;
+       * - trava financeira habilitada.
+       *
+       * O RPC registra o pagamento e aplica
+       * primeira contratação OU renovação
+       * dentro da transação PostgreSQL.
        */
-      void reconciled;
+      const {
+        error: applyError,
+      } = await admin.rpc(
+        'apply_verified_mercado_pago_payment',
+        {
+          p_order_id:
+            reconciled.orderId,
 
-      throw new Error(
-        'Aplicação financeira ainda não implementada.'
+          p_provider_payment_id:
+            reconciled.providerPaymentId,
+
+          p_amount_cents:
+            reconciled.amountCents,
+
+          p_currency:
+            reconciled.currency,
+
+          p_payment_method:
+            reconciled.paymentMethod,
+
+          p_paid_at:
+            reconciled.paidAt,
+        }
+      );
+
+      if (applyError) {
+        throw new Error(
+          `Falha na aplicação financeira: ${applyError.message}`
+        );
+      }
+
+      /*
+       * 12. PAGAMENTO JÁ FOI APLICADO.
+       *
+       * Agora podemos marcar esta tentativa
+       * do webhook como concluída.
+       */
+      const {
+        error: finishError,
+      } = await admin.rpc(
+        'finish_billing_webhook_event_v2',
+        {
+          p_event_id:
+            eventId,
+
+          p_attempt_token:
+            attemptToken,
+
+          p_success:
+            true,
+
+          p_error:
+            null,
+        }
+      );
+
+      if (finishError) {
+        /*
+         * O pagamento NÃO deve ser revertido aqui.
+         *
+         * O RPC financeiro é idempotente.
+         * Portanto uma reconciliação posterior
+         * poderá recuperar este cenário sem
+         * duplicar o pagamento.
+         */
+        throw new Error(
+          `Pagamento aplicado, mas webhook não pôde ser finalizado: ${finishError.message}`
+        );
+      }
+
+      /*
+       * 13. PROCESSAMENTO CONCLUÍDO.
+       */
+      return NextResponse.json(
+        {
+          received: true,
+          verified: true,
+          applied: true,
+        },
+        {
+          status: 200,
+          headers: noStore,
+        }
       );
     } catch (processingError) {
       const message =
@@ -428,19 +529,27 @@ export async function POST(
           : 'Erro desconhecido no processamento.';
 
       /*
-       * A tentativa somente pode ser encerrada
-       * utilizando o token que a reservou.
+       * Marca a tentativa como falha.
+       *
+       * O token impede uma tentativa antiga
+       * de finalizar uma tentativa mais nova.
        */
       const {
         error: finishError,
       } = await admin.rpc(
         'finish_billing_webhook_event_v2',
         {
-          p_event_id: eventId,
+          p_event_id:
+            eventId,
+
           p_attempt_token:
             attemptToken,
-          p_success: false,
-          p_error: message,
+
+          p_success:
+            false,
+
+          p_error:
+            message,
         }
       );
 
@@ -488,23 +597,23 @@ export async function POST(
 
 export async function GET() {
   const webhookEnabled =
-    process.env
-      .MERCADO_PAGO_WEBHOOK_ENABLED ===
+    process.env.MERCADO_PAGO_WEBHOOK_ENABLED ===
     'true';
 
   const applyPayments =
-    process.env
-      .MERCADO_PAGO_APPLY_PAYMENTS ===
+    process.env.MERCADO_PAGO_APPLY_PAYMENTS ===
     'true';
 
   return NextResponse.json(
     {
       service:
         'mirracrm-billing-webhook',
+
       webhook:
         webhookEnabled
           ? 'enabled'
           : 'disabled',
+
       financialApplication:
         applyPayments
           ? 'enabled'
