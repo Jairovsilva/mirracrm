@@ -39,12 +39,18 @@ function parseSignature(
     const value = part.slice(separator + 1).trim();
 
     if (key === 'ts') {
-      if (timestamp !== null) return null;
+      if (timestamp !== null) {
+        return null;
+      }
+
       timestamp = value;
     }
 
     if (key === 'v1') {
-      if (hash !== null) return null;
+      if (hash !== null) {
+        return null;
+      }
+
       hash = value;
     }
   }
@@ -67,9 +73,11 @@ function parseSignature(
 /**
  * Valida a assinatura de uma notificação do Mercado Pago.
  *
- * Não aprova pagamentos.
- * Não consulta o provedor.
- * Não altera o banco.
+ * IMPORTANTE:
+ * - Não aprova pagamentos.
+ * - Não consulta o Mercado Pago.
+ * - Não altera o banco de dados.
+ * - Não deve ser usado sozinho para confirmar pagamento.
  */
 export function validateMercadoPagoWebhookSignature({
   signatureHeader,
@@ -86,19 +94,37 @@ export function validateMercadoPagoWebhookSignature({
     return false;
   }
 
-  const signature = parseSignature(signatureHeader);
+  const signature = parseSignature(
+    signatureHeader
+  );
 
   if (!signature) {
     return false;
   }
 
-  // Evita aceitar timestamps impossíveis ou muito antigos.
-  const timestampMs = Number(signature.timestamp) * 1000;
+  /**
+   * O "ts" informado pelo Mercado Pago
+   * na assinatura é tratado em milissegundos.
+   */
+  const timestampMs = Number(
+    signature.timestamp
+  );
 
-  if (!Number.isSafeInteger(timestampMs)) {
+  if (
+    !Number.isSafeInteger(timestampMs)
+  ) {
     return false;
   }
 
+  /**
+   * Proteção adicional contra replay.
+   *
+   * Aceitamos uma diferença máxima de
+   * 5 minutos entre a assinatura e o servidor.
+   *
+   * Essa janela poderá ser ajustada depois
+   * dos testes reais do webhook.
+   */
   const now = Date.now();
   const maxAgeMs = 5 * 60 * 1000;
 
@@ -109,23 +135,47 @@ export function validateMercadoPagoWebhookSignature({
     return false;
   }
 
+  /**
+   * Manifest utilizado na validação
+   * da assinatura.
+   */
   const manifest =
     `id:${dataId.toLowerCase()};` +
     `request-id:${requestId};` +
     `ts:${signature.timestamp};`;
 
-  const expected = createHmac('sha256', secret)
+  /**
+   * Calcula o HMAC esperado utilizando
+   * exclusivamente o segredo do webhook.
+   */
+  const expected = createHmac(
+    'sha256',
+    secret
+  )
     .update(manifest)
     .digest();
 
+  /**
+   * A assinatura v1 recebida deve ser
+   * hexadecimal SHA-256 (32 bytes).
+   */
   const received = Buffer.from(
     signature.hash,
     'hex'
   );
 
-  if (received.length !== expected.length) {
+  if (
+    received.length !==
+    expected.length
+  ) {
     return false;
   }
 
-  return timingSafeEqual(received, expected);
+  /**
+   * Comparação resistente a timing attacks.
+   */
+  return timingSafeEqual(
+    received,
+    expected
+  );
 }
