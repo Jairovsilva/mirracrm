@@ -5,6 +5,16 @@ export const dynamic = 'force-dynamic';
 
 type BillingCycle = 'monthly' | 'annual';
 
+function errorResponse(message: string, status: number) {
+  return NextResponse.json(
+    { ok: false, error: message },
+    {
+      status,
+      headers: { 'Cache-Control': 'no-store' },
+    }
+  );
+}
+
 export async function POST(request: NextRequest) {
   try {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -12,21 +22,11 @@ export async function POST(request: NextRequest) {
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!supabaseUrl || !anonKey || !serviceRoleKey) {
-      console.error('Variáveis do Supabase ausentes na API de pedidos.');
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Configuração do servidor incompleta.',
-        },
-        { status: 500 }
-      );
+      console.error('Configuração do Supabase incompleta.');
+      return errorResponse('Configuração do servidor incompleta.', 500);
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // 1. AUTENTICAÇÃO
-    // ─────────────────────────────────────────────────────────────
-
+    // 1. Autenticar o usuário.
     const authorization = request.headers.get('authorization');
 
     const accessToken = authorization?.startsWith('Bearer ')
@@ -34,13 +34,7 @@ export async function POST(request: NextRequest) {
       : '';
 
     if (!accessToken) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Sessão não encontrada.',
-        },
-        { status: 401 }
-      );
+      return errorResponse('Sessão não encontrada.', 401);
     }
 
     const authClient = createClient(supabaseUrl, anonKey, {
@@ -56,16 +50,10 @@ export async function POST(request: NextRequest) {
     } = await authClient.auth.getUser(accessToken);
 
     if (userError || !user) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Sessão inválida. Faça login novamente.',
-        },
-        { status: 401 }
-      );
+      return errorResponse('Sessão inválida. Faça login novamente.', 401);
     }
 
-    // Cliente administrativo somente no servidor.
+    // A chave administrativa permanece exclusivamente no servidor.
     const admin = createClient(supabaseUrl, serviceRoleKey, {
       auth: {
         persistSession: false,
@@ -73,10 +61,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // ─────────────────────────────────────────────────────────────
-    // 2. VALIDAR SOLICITANTE
-    // ─────────────────────────────────────────────────────────────
-
+    // 2. Somente o proprietário pode contratar.
     const { data: profile, error: profileError } = await admin
       .from('profiles')
       .select('id, role')
@@ -84,30 +69,18 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (profileError || !profile) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Perfil não encontrado.',
-        },
-        { status: 404 }
-      );
+      return errorResponse('Perfil não encontrado.', 404);
     }
 
-    // Somente o proprietário contrata/altera o plano.
     if (profile.role !== 'owner') {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Apenas o proprietário da conta pode contratar um plano.',
-        },
-        { status: 403 }
+      return errorResponse(
+        'Apenas o proprietário da conta pode contratar um plano.',
+        403
       );
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // 3. IDENTIFICAR CONTA DE FATURAMENTO
-    // ─────────────────────────────────────────────────────────────
-
+    // 3. Identificar a conta pelo usuário autenticado.
+    // Nunca aceitar billing_account_id enviado pelo navegador.
     const { data: membership, error: membershipError } = await admin
       .from('billing_memberships')
       .select('billing_account_id')
@@ -115,13 +88,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (membershipError || !membership) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Conta de faturamento não encontrada.',
-        },
-        { status: 404 }
-      );
+      return errorResponse('Conta de faturamento não encontrada.', 404);
     }
 
     const accountId = membership.billing_account_id;
@@ -133,101 +100,65 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (accountError || !account) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Conta não encontrada.',
-        },
-        { status: 404 }
+      return errorResponse('Conta não encontrada.', 404);
+    }
+
+    if (account.is_legacy_free) {
+      return errorResponse(
+        'Esta conta possui acesso legado e não necessita contratar um plano.',
+        403
       );
     }
 
-    // Clientes históricos permanecem no modelo gratuito.
-    if (account.is_legacy_free === true) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Esta conta possui acesso legado e não necessita contratar um plano.',
-        },
-        { status: 403 }
-      );
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // 4. VALIDAR PLANO ESCOLHIDO
-    // ─────────────────────────────────────────────────────────────
-
-    let body: {
-      planId?: string;
-      billingCycle?: BillingCycle;
-    };
+    // 4. Validar a seleção.
+    let body: unknown;
 
     try {
       body = await request.json();
     } catch {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Dados da contratação inválidos.',
-        },
-        { status: 400 }
+      return errorResponse('Dados da contratação inválidos.', 400);
+    }
+
+    if (
+      !body ||
+      typeof body !== 'object' ||
+      Array.isArray(body)
+    ) {
+      return errorResponse('Dados da contratação inválidos.', 400);
+    }
+
+    const input = body as Record<string, unknown>;
+
+    if (
+      typeof input.planId !== 'string' ||
+      typeof input.billingCycle !== 'string'
+    ) {
+      return errorResponse('Plano ou periodicidade inválidos.', 400);
+    }
+
+    const planId = input.planId.trim().toLowerCase();
+
+    const billingCycle = input.billingCycle.trim() as BillingCycle;
+
+    if (planId === 'enterprise') {
+      return errorResponse(
+        'O plano Enterprise possui contratação personalizada.',
+        400
       );
     }
 
-    const planId = String(body.planId ?? '')
-      .trim()
-      .toLowerCase();
-
-    const billingCycle = String(
-      body.billingCycle ?? ''
-    ).trim() as BillingCycle;
-
-    if (!planId) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Selecione um plano.',
-        },
-        { status: 400 }
-      );
+    if (planId !== 'basic' && planId !== 'pro') {
+      return errorResponse('Plano inválido.', 400);
     }
 
     if (
       billingCycle !== 'monthly' &&
       billingCycle !== 'annual'
     ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Periodicidade inválida.',
-        },
-        { status: 400 }
-      );
+      return errorResponse('Periodicidade inválida.', 400);
     }
 
-    // Enterprise não possui checkout automático.
-    if (planId === 'enterprise') {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'O plano Enterprise possui contratação personalizada.',
-        },
-        { status: 400 }
-      );
-    }
-
-    // Whitelist dos planos vendidos automaticamente.
-    if (planId !== 'basic' && planId !== 'pro') {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Plano inválido.',
-        },
-        { status: 400 }
-      );
-    }
-
+    // 5. Consultar o plano e o preço exclusivamente no banco.
     const { data: plan, error: planError } = await admin
       .from('billing_plans')
       .select(
@@ -237,28 +168,15 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (planError || !plan) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Plano não encontrado.',
-        },
-        { status: 404 }
-      );
+      return errorResponse('Plano não encontrado.', 404);
     }
 
     if (!plan.is_active) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Este plano não está disponível para contratação.',
-        },
-        { status: 400 }
+      return errorResponse(
+        'Este plano não está disponível para contratação.',
+        400
       );
     }
-
-    // ─────────────────────────────────────────────────────────────
-    // 5. DETERMINAR PREÇO NO SERVIDOR
-    // ─────────────────────────────────────────────────────────────
 
     const amountCents =
       billingCycle === 'monthly'
@@ -270,100 +188,56 @@ export async function POST(request: NextRequest) {
       !Number.isInteger(amountCents) ||
       amountCents <= 0
     ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Preço do plano não configurado.',
-        },
-        { status: 500 }
-      );
+      return errorResponse('Preço do plano não configurado.', 500);
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // 6. CANCELAR PEDIDOS PENDENTES ANTIGOS DA MESMA CONTA
-    // ─────────────────────────────────────────────────────────────
-
-    const { error: cancelError } = await admin
-      .from('billing_orders')
-      .update({
-        status: 'canceled',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('billing_account_id', accountId)
-      .eq('status', 'pending');
-
-    if (cancelError) {
-      console.error(
-        'Erro ao cancelar pedidos pendentes anteriores:',
-        cancelError
-      );
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Não foi possível preparar a nova contratação.',
-        },
-        { status: 500 }
-      );
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // 7. CRIAR NOVO PEDIDO
-    // ─────────────────────────────────────────────────────────────
-
-    const expiresAt = new Date(
-      Date.now() + 30 * 60 * 1000
-    ).toISOString();
-
-    const { data: order, error: orderError } = await admin
-      .from('billing_orders')
-      .insert({
-        billing_account_id: accountId,
-        plan_id: plan.id,
-        billing_cycle: billingCycle,
-        amount_cents: amountCents,
-        currency: 'BRL',
-        status: 'pending',
-        provider: 'mercado_pago',
-        expires_at: expiresAt,
-      })
-      .select(
-        `
-          id,
-          plan_id,
-          billing_cycle,
-          amount_cents,
-          currency,
-          status,
-          expires_at,
-          created_at
-        `
-      )
-      .single();
+    // 6. Criar ou reutilizar o pedido dentro de uma transação SQL.
+    // A função bloqueia a conta e impede criação concorrente.
+    const { data: order, error: orderError } = await admin.rpc(
+      'create_or_reuse_billing_order',
+      {
+        p_account_id: accountId,
+        p_plan_id: planId,
+        p_billing_cycle: billingCycle,
+      }
+    );
 
     if (orderError || !order) {
-      console.error(
-        'Erro ao criar pedido de contratação:',
-        orderError
-      );
+      console.error('Erro ao criar ou reutilizar pedido:', orderError);
 
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Não foi possível criar o pedido.',
-        },
-        { status: 500 }
+      const message = orderError?.message || '';
+
+      if (
+        message.includes('pagamento em processamento') ||
+        message.includes('contratação iniciada')
+      ) {
+        return errorResponse(message, 409);
+      }
+
+      if (
+        message.includes('Plano indisponível') ||
+        message.includes('Plano ou periodicidade inválidos')
+      ) {
+        return errorResponse(message, 400);
+      }
+
+      return errorResponse(
+        'Não foi possível preparar a contratação.',
+        500
       );
     }
 
-    // IMPORTANTE:
-    // Criar um pedido NÃO ativa a assinatura.
-    // A ativação ocorrerá posteriormente após confirmação
-    // válida do pagamento pelo provedor.
+    // 7. Responder com os dados efetivamente gravados no banco.
+    // A função pode ter reutilizado um pedido anterior.
+    const reused =
+      new Date(order.created_at).getTime() <
+      Date.now() - 5000;
 
     return NextResponse.json(
       {
         ok: true,
+
+        reused,
 
         order: {
           id: order.id,
@@ -388,24 +262,15 @@ export async function POST(request: NextRequest) {
         },
       },
       {
-        status: 201,
+        status: reused ? 200 : 201,
         headers: {
           'Cache-Control': 'no-store',
         },
       }
     );
   } catch (error) {
-    console.error(
-      'Erro inesperado na criação do pedido:',
-      error
-    );
+    console.error('Erro inesperado na API de pedidos:', error);
 
-    return NextResponse.json(
-      {
-        ok: false,
-        error: 'Erro inesperado no servidor.',
-      },
-      { status: 500 }
-    );
+    return errorResponse('Erro inesperado no servidor.', 500);
   }
 }
