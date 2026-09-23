@@ -3,6 +3,25 @@ import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function parseTimestamp(value: string | null): number | null {
+  if (!value) return null;
+
+  const timestamp = new Date(value).getTime();
+
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function remainingDays(
+  timestamp: number | null,
+  now: number
+): number | null {
+  if (timestamp === null) return null;
+
+  return Math.max(0, Math.ceil((timestamp - now) / DAY_MS));
+}
+
 export async function GET(request: NextRequest) {
   try {
     const authorization = request.headers.get("authorization");
@@ -36,7 +55,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Valida o token enviado pelo usuário.
+    // Valida a sessão do usuário.
     const authClient = createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
         persistSession: false,
@@ -70,9 +89,7 @@ export async function GET(request: NextRequest) {
       .eq("user_id", user.id)
       .maybeSingle();
 
-    if (membershipError) {
-      throw membershipError;
-    }
+    if (membershipError) throw membershipError;
 
     if (!membership) {
       return NextResponse.json(
@@ -130,13 +147,17 @@ export async function GET(request: NextRequest) {
 
     const now = Date.now();
 
-    const trialEndsAt = subscription.trial_ends_at
-      ? new Date(subscription.trial_ends_at).getTime()
-      : null;
+    const trialEndsAt = parseTimestamp(
+      subscription.trial_ends_at
+    );
 
-    const periodEndsAt = subscription.current_period_ends_at
-      ? new Date(subscription.current_period_ends_at).getTime()
-      : null;
+    const periodStartsAt = parseTimestamp(
+      subscription.current_period_starts_at
+    );
+
+    const periodEndsAt = parseTimestamp(
+      subscription.current_period_ends_at
+    );
 
     const isLegacyFree =
       account.is_legacy_free === true &&
@@ -145,26 +166,60 @@ export async function GET(request: NextRequest) {
     const trialValid =
       subscription.status === "trialing" &&
       trialEndsAt !== null &&
-      Number.isFinite(trialEndsAt) &&
       trialEndsAt > now;
 
     const subscriptionValid =
       subscription.status === "active" &&
       periodEndsAt !== null &&
-      Number.isFinite(periodEndsAt) &&
       periodEndsAt > now;
 
     const hasAccess =
       isLegacyFree || trialValid || subscriptionValid;
 
-    const trialDaysRemaining =
+    /*
+     * Cliente ainda está no teste gratuito e não contratou.
+     */
+    const isTrialing =
       subscription.status === "trialing" &&
       trialEndsAt !== null &&
-      Number.isFinite(trialEndsAt)
-        ? Math.max(
-            0,
-            Math.ceil((trialEndsAt - now) / (1000 * 60 * 60 * 24))
-          )
+      trialEndsAt > now;
+
+    /*
+     * Cliente já contratou, mas o período pago começará
+     * somente após o término do teste gratuito.
+     */
+    const isPaidAwaitingStart =
+      subscription.status === "active" &&
+      subscription.plan_id !== null &&
+      trialEndsAt !== null &&
+      trialEndsAt > now &&
+      periodStartsAt !== null &&
+      periodStartsAt > now &&
+      periodEndsAt !== null &&
+      periodEndsAt > periodStartsAt;
+
+    /*
+     * Período pago efetivamente iniciado.
+     */
+    const isPaidPeriod =
+      subscription.status === "active" &&
+      periodStartsAt !== null &&
+      periodStartsAt <= now &&
+      periodEndsAt !== null &&
+      periodEndsAt > now;
+
+    /*
+     * Mantém a contagem do teste também quando o cliente
+     * já pagou antecipadamente.
+     */
+    const trialDaysRemaining =
+      isTrialing || isPaidAwaitingStart
+        ? remainingDays(trialEndsAt, now)
+        : null;
+
+    const paidPeriodDaysRemaining =
+      isPaidPeriod
+        ? remainingDays(periodEndsAt, now)
         : null;
 
     const effectiveStatus =
@@ -174,6 +229,22 @@ export async function GET(request: NextRequest) {
           ? "expired"
           : subscription.status;
 
+    /*
+     * Campo informativo para a interface.
+     * Não substitui a validação de acesso no banco.
+     */
+    const billingPhase = isLegacyFree
+      ? "legacy_free"
+      : isPaidAwaitingStart
+        ? "paid_awaiting_start"
+        : isTrialing
+          ? "trial"
+          : isPaidPeriod
+            ? "paid"
+            : hasAccess
+              ? "active"
+              : "inactive";
+
     return NextResponse.json(
       {
         account: {
@@ -181,19 +252,30 @@ export async function GET(request: NextRequest) {
           companyName: account.company_name,
           isLegacyFree: account.is_legacy_free,
         },
+
         subscription: {
           status: subscription.status,
           effectiveStatus,
           billingCycle: subscription.billing_cycle,
+
           trialStartsAt: subscription.trial_starts_at,
           trialEndsAt: subscription.trial_ends_at,
           trialDaysRemaining,
+
           currentPeriodStartsAt:
             subscription.current_period_starts_at,
+
           currentPeriodEndsAt:
             subscription.current_period_ends_at,
+
           hasAccess,
+
+          // Novos campos para a interface.
+          billingPhase,
+          isPaidAwaitingStart,
+          paidPeriodDaysRemaining,
         },
+
         plan,
       },
       {
