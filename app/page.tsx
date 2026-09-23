@@ -376,7 +376,7 @@ export default function Home() {
 
               <div className="relative overflow-hidden rounded-[26px] border border-white/10 bg-[#0b1628] p-2 shadow-2xl">
                 <Image
-                  src="/mirra-dashboard.png"
+                  src="/mirra-funil.png"
                   alt="Indicadores comerciais do MirraCRM"
                   width={1900}
                   height={810}
