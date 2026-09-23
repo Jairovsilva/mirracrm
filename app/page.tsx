@@ -9,6 +9,7 @@ import {
   BarChart3,
   Check,
   ChevronRight,
+  Mail,
   Menu,
   MessageCircle,
   ShieldCheck,
@@ -64,16 +65,6 @@ export default function Home() {
     ? 'R$ 16.167,60'
     : 'R$ 1.497';
 
-  /*
-   * Esta informação viaja para /cadastro.
-   *
-   * Exemplos:
-   *
-   * /cadastro?plan=basic&cycle=monthly
-   * /cadastro?plan=basic&cycle=annual
-   * /cadastro?plan=pro&cycle=monthly
-   * /cadastro?plan=pro&cycle=annual
-   */
   const billingCycle = annual
     ? 'annual'
     : 'monthly';
@@ -174,7 +165,6 @@ export default function Home() {
           </button>
         </div>
 
-        {/* MENU MOBILE */}
         {menuOpen && (
           <div className="border-t border-white/10 bg-[#07101f] px-6 py-6 lg:hidden">
             <div className="flex flex-col gap-5">
@@ -296,7 +286,6 @@ export default function Home() {
             ))}
           </div>
 
-          {/* DASHBOARD REAL */}
           <div className="relative mx-auto mt-16 max-w-6xl">
             <div className="absolute -inset-8 rounded-[50px] bg-sky-500/[0.08] blur-3xl" />
 
@@ -325,7 +314,7 @@ export default function Home() {
       </section>
 
       {/* ==================================================
-          PRODUTO
+          CLAREZA COMERCIAL / FUNIL
       ================================================== */}
       <section
         id="produto"
@@ -377,12 +366,81 @@ export default function Home() {
               <div className="relative overflow-hidden rounded-[26px] border border-white/10 bg-[#0b1628] p-2 shadow-2xl">
                 <Image
                   src="/mirra-funil.png"
-                  alt="Indicadores comerciais do MirraCRM"
-                  width={1900}
-                  height={810}
+                  alt="Funil de vendas B2B do MirraCRM"
+                  width={1754}
+                  height={832}
                   className="h-auto w-full rounded-[20px]"
                 />
               </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ==================================================
+          EMAILS E PROPOSTAS COMERCIAIS
+      ================================================== */}
+      <section className="relative overflow-hidden border-y border-white/[0.06] bg-white/[0.018] py-28 sm:py-36">
+        <div className="pointer-events-none absolute left-0 top-1/2 h-[500px] w-[500px] -translate-y-1/2 rounded-full bg-sky-500/[0.06] blur-[120px]" />
+
+        <div className="relative mx-auto grid max-w-7xl items-center gap-16 px-6 lg:grid-cols-[1.2fr_0.8fr] lg:px-8">
+          {/* IMAGEM */}
+          <div className="relative order-2 lg:order-1">
+            <div className="absolute inset-10 bg-sky-500/[0.08] blur-[90px]" />
+
+            <div className="relative overflow-hidden rounded-[26px] border border-white/10 bg-[#0b1628] p-2 shadow-2xl">
+              <Image
+                src="/mirra-email-propostas.png"
+                alt="Envio de e-mails e propostas comerciais pelo MirraCRM"
+                width={1900}
+                height={900}
+                className="h-auto w-full rounded-[20px]"
+              />
+            </div>
+          </div>
+
+          {/* TEXTO */}
+          <div className="order-1 lg:order-2">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-400/10 text-sky-400">
+              <Mail className="h-6 w-6" />
+            </div>
+
+            <p className="mt-7 text-sm font-bold uppercase tracking-[0.18em] text-sky-400">
+              Comunicação comercial
+            </p>
+
+            <h2 className="mt-5 text-4xl font-semibold leading-tight tracking-[-0.04em] sm:text-5xl">
+              Envie e-mails e propostas sem sair do
+              CRM.
+            </h2>
+
+            <p className="mt-6 text-base leading-8 text-slate-400">
+              Centralize sua comunicação comercial no
+              mesmo ambiente em que sua equipe
+              gerencia leads e oportunidades. Envie
+              e-mails e propostas comerciais
+              diretamente pelo MirraCRM, mantendo o
+              processo de vendas mais conectado.
+            </p>
+
+            <div className="mt-8 space-y-4">
+              {[
+                'Envio de e-mails pelo CRM',
+                'Envio de propostas comerciais',
+                'Comunicação conectada ao processo de vendas',
+                'Menos troca entre diferentes ferramentas',
+              ].map((item) => (
+                <div
+                  key={item}
+                  className="flex items-center gap-3 text-sm text-slate-300"
+                >
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-400/10">
+                    <Check className="h-3.5 w-3.5 text-emerald-400" />
+                  </span>
+
+                  {item}
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -393,7 +451,7 @@ export default function Home() {
       ================================================== */}
       <section
         id="recursos"
-        className="scroll-mt-24 border-y border-white/[0.06] bg-white/[0.018] py-28"
+        className="scroll-mt-24 border-b border-white/[0.06] bg-white/[0.018] py-28"
       >
         <div className="mx-auto max-w-7xl px-6 lg:px-8">
           <div className="max-w-2xl">
@@ -493,6 +551,7 @@ export default function Home() {
                   className="flex items-center gap-3 text-sm text-slate-300"
                 >
                   <Check className="h-4 w-4 text-emerald-400" />
+
                   {item}
                 </div>
               ))}
@@ -573,7 +632,6 @@ export default function Home() {
               sua operação comercial.
             </p>
 
-            {/* SELETOR MENSAL / ANUAL */}
             <div className="mx-auto mt-9 inline-flex rounded-xl border border-white/10 bg-white/[0.04] p-1">
               <button
                 type="button"
@@ -612,9 +670,7 @@ export default function Home() {
           </div>
 
           <div className="mt-14 grid gap-5 lg:grid-cols-3">
-            {/* ============================================
-                BASIC
-            ============================================ */}
+            {/* BASIC */}
             <article className="flex flex-col rounded-[28px] border border-white/10 bg-[#091425] p-8">
               <p className="text-sm font-semibold text-slate-400">
                 BASIC
@@ -661,8 +717,6 @@ export default function Home() {
                 ))}
               </div>
 
-              {/* ALTERADO:
-                  agora transporta plano + ciclo */}
               <Link
                 href={`/cadastro?plan=basic&cycle=${billingCycle}`}
                 className="mt-9 flex items-center justify-center rounded-xl border border-white/15 px-5 py-3.5 text-sm font-bold transition hover:bg-white hover:text-[#07101f]"
@@ -671,9 +725,7 @@ export default function Home() {
               </Link>
             </article>
 
-            {/* ============================================
-                PRO
-            ============================================ */}
+            {/* PRO */}
             <article className="relative flex flex-col rounded-[28px] border border-sky-400/40 bg-gradient-to-b from-sky-400/[0.12] to-[#091425] p-8 shadow-[0_0_60px_rgba(56,189,248,0.08)]">
               <div className="absolute right-6 top-6 rounded-full bg-sky-400 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[#04101d]">
                 Equipes em crescimento
@@ -724,8 +776,6 @@ export default function Home() {
                 ))}
               </div>
 
-              {/* ALTERADO:
-                  agora transporta plano + ciclo */}
               <Link
                 href={`/cadastro?plan=pro&cycle=${billingCycle}`}
                 className="mt-9 flex items-center justify-center gap-2 rounded-xl bg-sky-400 px-5 py-3.5 text-sm font-bold text-[#04101d] transition hover:bg-sky-300"
@@ -735,9 +785,7 @@ export default function Home() {
               </Link>
             </article>
 
-            {/* ============================================
-                ENTERPRISE
-            ============================================ */}
+            {/* ENTERPRISE */}
             <article className="flex flex-col rounded-[28px] border border-white/10 bg-[#091425] p-8">
               <p className="text-sm font-semibold text-slate-400">
                 ENTERPRISE
