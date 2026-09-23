@@ -189,6 +189,59 @@ export default function AppPage() {
     };
   }, [isAuthorized, checkBilling]);
 
+  const [testingOrder, setTestingOrder] = useState(false);
+
+  const handleTestOrder = async () => {
+    if (testingOrder) return;
+    setTestingOrder(true);
+
+    try {
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
+      if (sessionError || !token) {
+        alert('Sessão não encontrada. Faça login novamente.');
+        return;
+      }
+
+      const response = await fetch('/api/billing/orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ planId: 'basic', billingCycle: 'monthly' }),
+      });
+
+      const result = await response.json();
+      if (!response.ok || !result.ok) {
+        alert(`ERRO: ${result.error || 'Não foi possível criar o pedido.'}`);
+        return;
+      }
+
+      const valor = (result.order.amountCents / 100).toLocaleString('pt-BR', {
+        style: 'currency',
+        currency: 'BRL',
+      });
+
+      alert(
+        `PEDIDO CRIADO COM SUCESSO!\n\n` +
+        `Plano: ${result.order.plan.name}\n` +
+        `Valor: ${valor}\n` +
+        `Ciclo: ${result.order.billingCycle}\n` +
+        `Status: ${result.order.status}\n` +
+        `Mercado Pago configurado: ${result.payment.configured ? 'Sim' : 'Não'}\n\n` +
+        `ID do pedido: ${result.order.id}`
+      );
+    } catch (error) {
+      console.error('Erro no teste do pedido:', error);
+      alert('Erro inesperado ao testar a contratação.');
+    } finally {
+      setTestingOrder(false);
+    }
+  };
+
   const handleLogout = async () => {
     await useCRMStore.getState().logout();
     window.location.replace('/');
@@ -300,12 +353,24 @@ export default function AppPage() {
       </div>
 
       {isTrial && (
-        <div className="w-full bg-blue-600 text-white text-center text-xs sm:text-sm font-semibold py-2 px-4 shrink-0">
-          🎁 Seu teste gratuito está ativo.{' '}
-          {daysRemaining === 1
-            ? 'Resta 1 dia.'
-            : `Restam ${daysRemaining} dias.`}
-          {' '}Aproveite para conhecer o MirraCRM!
+        <div className="w-full bg-blue-600 text-white text-xs sm:text-sm font-semibold py-2 px-4 shrink-0">
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <span>
+              🎁 Seu teste gratuito está ativo.{' '}
+              {daysRemaining === 1
+                ? 'Resta 1 dia.'
+                : `Restam ${daysRemaining} dias.`}
+              {' '}Aproveite para conhecer o MirraCRM!
+            </span>
+            <button
+              type="button"
+              onClick={handleTestOrder}
+              disabled={testingOrder}
+              className="rounded-md bg-white px-3 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-50 transition disabled:opacity-60"
+            >
+              {testingOrder ? 'CRIANDO PEDIDO...' : 'TESTAR CONTRATAÇÃO'}
+            </button>
+          </div>
         </div>
       )}
 
