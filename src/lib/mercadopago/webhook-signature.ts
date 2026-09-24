@@ -35,8 +35,13 @@ function parseSignature(
       return null;
     }
 
-    const key = part.slice(0, separator).trim();
-    const value = part.slice(separator + 1).trim();
+    const key = part
+      .slice(0, separator)
+      .trim();
+
+    const value = part
+      .slice(separator + 1)
+      .trim();
 
     if (key === 'ts') {
       if (timestamp !== null) {
@@ -71,13 +76,14 @@ function parseSignature(
 }
 
 /**
- * Valida a assinatura de uma notificação do Mercado Pago.
+ * Valida a assinatura de uma notificação
+ * Webhook do Mercado Pago.
  *
- * IMPORTANTE:
- * - Não aprova pagamentos.
- * - Não consulta o Mercado Pago.
- * - Não altera o banco de dados.
- * - Não deve ser usado sozinho para confirmar pagamento.
+ * Esta função:
+ * - valida a autenticidade da notificação;
+ * - não aprova pagamentos;
+ * - não consulta o Mercado Pago;
+ * - não altera o banco de dados.
  */
 export function validateMercadoPagoWebhookSignature({
   signatureHeader,
@@ -88,8 +94,7 @@ export function validateMercadoPagoWebhookSignature({
   if (
     !secret ||
     !requestId ||
-    !dataId ||
-    !/^[0-9]+$/.test(dataId)
+    !dataId
   ) {
     return false;
   }
@@ -103,50 +108,29 @@ export function validateMercadoPagoWebhookSignature({
   }
 
   /**
-   * O "ts" informado pelo Mercado Pago
-   * na assinatura é tratado em milissegundos.
+   * O Mercado Pago exige que data.id seja
+   * utilizado em minúsculas para a validação
+   * quando houver caracteres alfabéticos.
    */
-  const timestampMs = Number(
-    signature.timestamp
-  );
-
-  if (
-    !Number.isSafeInteger(timestampMs)
-  ) {
-    return false;
-  }
+  const normalizedDataId =
+    dataId.toLowerCase();
 
   /**
-   * Proteção adicional contra replay.
+   * Manifest oficial do Mercado Pago:
    *
-   * Aceitamos uma diferença máxima de
-   * 5 minutos entre a assinatura e o servidor.
-   *
-   * Essa janela poderá ser ajustada depois
-   * dos testes reais do webhook.
-   */
-  const now = Date.now();
-  const maxAgeMs = 5 * 60 * 1000;
-
-  if (
-    timestampMs > now + maxAgeMs ||
-    timestampMs < now - maxAgeMs
-  ) {
-    return false;
-  }
-
-  /**
-   * Manifest utilizado na validação
-   * da assinatura.
+   * id:[data.id_url];
+   * request-id:[x-request-id_header];
+   * ts:[ts_header];
    */
   const manifest =
-    `id:${dataId.toLowerCase()};` +
+    `id:${normalizedDataId};` +
     `request-id:${requestId};` +
     `ts:${signature.timestamp};`;
 
   /**
-   * Calcula o HMAC esperado utilizando
-   * exclusivamente o segredo do webhook.
+   * Gera HMAC-SHA256 utilizando a
+   * assinatura secreta configurada
+   * para o Webhook.
    */
   const expected = createHmac(
     'sha256',
@@ -156,8 +140,8 @@ export function validateMercadoPagoWebhookSignature({
     .digest();
 
   /**
-   * A assinatura v1 recebida deve ser
-   * hexadecimal SHA-256 (32 bytes).
+   * Converte o v1 hexadecimal recebido
+   * para os mesmos bytes do HMAC esperado.
    */
   const received = Buffer.from(
     signature.hash,
@@ -172,7 +156,7 @@ export function validateMercadoPagoWebhookSignature({
   }
 
   /**
-   * Comparação resistente a timing attacks.
+   * Comparação em tempo constante.
    */
   return timingSafeEqual(
     received,
