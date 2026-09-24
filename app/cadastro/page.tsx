@@ -9,7 +9,12 @@ import React, {
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import {
+  useRouter,
+  useSearchParams,
+} from 'next/navigation';
+
+import { createClient } from '@supabase/supabase-js';
 
 import {
   ArrowLeft,
@@ -25,7 +30,10 @@ import {
 } from 'lucide-react';
 
 type PlanId = 'basic' | 'pro';
-type BillingCycle = 'monthly' | 'annual';
+
+type BillingCycle =
+  | 'monthly'
+  | 'annual';
 
 type PlanConfig = {
   id: PlanId;
@@ -35,7 +43,10 @@ type PlanConfig = {
   annualPrice: string;
 };
 
-const PLANS: Record<PlanId, PlanConfig> = {
+const PLANS: Record<
+  PlanId,
+  PlanConfig
+> = {
   basic: {
     id: 'basic',
     name: 'Basic',
@@ -55,39 +66,64 @@ const PLANS: Record<PlanId, PlanConfig> = {
 
 function CadastroContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
+  const searchParams =
+    useSearchParams();
 
-  const requestedPlan = searchParams.get('plan');
-  const requestedCycle = searchParams.get('cycle');
+  const requestedPlan =
+    searchParams.get('plan');
+
+  const requestedCycle =
+    searchParams.get('cycle');
 
   const plan: PlanId =
-    requestedPlan === 'pro' ? 'pro' : 'basic';
+    requestedPlan === 'pro'
+      ? 'pro'
+      : 'basic';
 
   const cycle: BillingCycle =
     requestedCycle === 'annual'
       ? 'annual'
       : 'monthly';
 
-  const selectedPlan = PLANS[plan];
+  const selectedPlan =
+    PLANS[plan];
 
-  const [name, setName] = useState('');
-  const [companyName, setCompanyName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] =
+  const [name, setName] =
     useState('');
 
-  const [showPassword, setShowPassword] =
-    useState(false);
+  const [
+    companyName,
+    setCompanyName,
+  ] = useState('');
 
-  const [error, setError] = useState('');
-  const [submitting, setSubmitting] =
-    useState(false);
+  const [email, setEmail] =
+    useState('');
+
+  const [password, setPassword] =
+    useState('');
+
+  const [
+    confirmPassword,
+    setConfirmPassword,
+  ] = useState('');
+
+  const [
+    showPassword,
+    setShowPassword,
+  ] = useState(false);
+
+  const [error, setError] =
+    useState('');
+
+  const [
+    submitting,
+    setSubmitting,
+  ] = useState(false);
 
   useEffect(() => {
     /*
-     * Se alguém digitar manualmente um plano
-     * inválido na URL, normalizamos a rota.
+     * Normaliza URLs digitadas
+     * manualmente com plano inválido.
      */
     if (
       requestedPlan !== 'basic' &&
@@ -113,18 +149,27 @@ function CadastroContent() {
       ? 'por ano'
       : 'por mês';
 
-  function handleSubmit(
+  async function handleSubmit(
     event: FormEvent<HTMLFormElement>
   ) {
     event.preventDefault();
+
+    if (submitting) {
+      return;
+    }
+
     setError('');
 
-    const normalizedName = name.trim();
+    const normalizedName =
+      name.trim();
+
     const normalizedCompany =
       companyName.trim();
 
     const normalizedEmail =
-      email.trim().toLowerCase();
+      email
+        .trim()
+        .toLowerCase();
 
     if (
       !normalizedName ||
@@ -136,20 +181,28 @@ function CadastroContent() {
       setError(
         'Preencha todos os campos para continuar.'
       );
+
       return;
     }
 
-    if (normalizedName.length > 120) {
+    if (
+      normalizedName.length > 120
+    ) {
       setError(
         'Informe um nome válido.'
       );
+
       return;
     }
 
-    if (normalizedCompany.length > 160) {
+    if (
+      normalizedCompany.length >
+      160
+    ) {
       setError(
         'Informe um nome de empresa válido.'
       );
+
       return;
     }
 
@@ -157,30 +210,34 @@ function CadastroContent() {
       /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
     if (
-      !emailRegex.test(normalizedEmail) ||
+      !emailRegex.test(
+        normalizedEmail
+      ) ||
       normalizedEmail.length > 254
     ) {
       setError(
         'Informe um endereço de e-mail válido.'
       );
+
       return;
     }
 
-    /*
-     * Mantemos a mesma exigência mínima
-     * que o servidor já possui.
-     */
     if (password.length < 8) {
       setError(
         'A senha deve ter pelo menos 8 caracteres.'
       );
+
       return;
     }
 
-    if (password !== confirmPassword) {
+    if (
+      password !==
+      confirmPassword
+    ) {
       setError(
         'As senhas informadas não são iguais.'
       );
+
       return;
     }
 
@@ -188,49 +245,178 @@ function CadastroContent() {
 
     try {
       /*
-       * IMPORTANTE:
+       * 1. Criar a identidade e
+       * estrutura de billing pelo
+       * nosso servidor.
        *
-       * NÃO chamamos /api/register aqui.
+       * A service_role nunca chega
+       * ao navegador.
+       */
+      const registerResponse =
+        await fetch(
+          '/api/register',
+          {
+            method: 'POST',
+
+            headers: {
+              'Content-Type':
+                'application/json',
+            },
+
+            body: JSON.stringify({
+              name:
+                normalizedName,
+
+              companyName:
+                normalizedCompany,
+
+              email:
+                normalizedEmail,
+
+              password,
+            }),
+          }
+        );
+
+      let registerResult: {
+        ok?: boolean;
+        error?: string;
+      } = {};
+
+      try {
+        registerResult =
+          await registerResponse.json();
+      } catch {
+        throw new Error(
+          'O servidor retornou uma resposta inválida.'
+        );
+      }
+
+      if (
+        !registerResponse.ok ||
+        !registerResult.ok
+      ) {
+        throw new Error(
+          registerResult.error ||
+            'Não foi possível concluir o cadastro.'
+        );
+      }
+
+      /*
+       * 2. O cadastro administrativo
+       * não cria uma sessão no browser.
        *
-       * O endpoint atual inicia imediatamente
-       * o trial. Queremos primeiro concluir a
-       * etapa segura de contratação/cartão.
+       * Fazemos o login normal do
+       * usuário recém-criado.
+       */
+      const supabaseUrl =
+        process.env
+          .NEXT_PUBLIC_SUPABASE_URL;
+
+      const supabaseAnonKey =
+        process.env
+          .NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+      if (
+        !supabaseUrl ||
+        !supabaseAnonKey
+      ) {
+        throw new Error(
+          'Configuração de autenticação indisponível.'
+        );
+      }
+
+      const supabase =
+        createClient(
+          supabaseUrl,
+          supabaseAnonKey,
+          {
+            auth: {
+              persistSession: true,
+              autoRefreshToken: true,
+              detectSessionInUrl:
+                true,
+            },
+          }
+        );
+
+      const {
+        data: loginData,
+        error: loginError,
+      } =
+        await supabase.auth
+          .signInWithPassword({
+            email:
+              normalizedEmail,
+
+            password,
+          });
+
+      if (
+        loginError ||
+        !loginData.session
+      ) {
+        throw new Error(
+          'Sua conta foi criada, mas não foi possível iniciar a sessão. Faça login para continuar.'
+        );
+      }
+
+      /*
+       * 3. Guardamos somente dados
+       * NÃO sensíveis para apresentar
+       * o resumo na próxima página.
        *
-       * sessionStorage:
-       * - permanece somente nesta aba;
-       * - não é enviado ao servidor agora;
-       * - será consumido pela próxima etapa.
-       *
-       * A senha NÃO será armazenada aqui.
+       * Nunca armazenamos a senha.
        */
       const signupDraft = {
-        name: normalizedName,
-        companyName: normalizedCompany,
-        email: normalizedEmail,
+        name:
+          normalizedName,
+
+        companyName:
+          normalizedCompany,
+
+        email:
+          normalizedEmail,
+
         plan,
+
         cycle,
-        createdAt: new Date().toISOString(),
+
+        createdAt:
+          new Date().toISOString(),
       };
 
       sessionStorage.setItem(
         'mirra_signup_draft',
-        JSON.stringify(signupDraft)
+        JSON.stringify(
+          signupDraft
+        )
       );
 
       /*
-       * A senha fica somente em memória durante
-       * esta página. Não colocamos senha em
-       * localStorage/sessionStorage.
+       * 4. Usuário já está
+       * autenticado.
        *
-       * Portanto, até integrarmos a etapa final,
-       * ainda NÃO criamos a conta.
+       * A próxima página poderá
+       * chamar /api/billing/orders
+       * usando o access_token da
+       * sessão.
        */
       router.push(
         `/cadastro/pagamento?plan=${plan}&cycle=${cycle}`
       );
-    } catch {
+    } catch (
+      caughtError
+    ) {
+      console.error(
+        'Erro ao concluir cadastro:',
+        caughtError
+      );
+
       setError(
-        'Não foi possível continuar. Tente novamente.'
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Não foi possível continuar. Tente novamente.'
       );
 
       setSubmitting(false);
@@ -297,12 +483,14 @@ function CadastroContent() {
             </p>
 
             <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">
-              Vamos preparar seu MirraCRM.
+              Vamos preparar seu
+              MirraCRM.
             </h1>
 
             <p className="mt-5 max-w-xl text-base leading-7 text-slate-400">
-              Informe seus dados e os dados da
-              empresa. Na próxima etapa você
+              Informe seus dados e
+              os dados da empresa.
+              Na próxima etapa você
               concluirá a contratação.
             </p>
           </div>
@@ -317,7 +505,9 @@ function CadastroContent() {
           )}
 
           <form
-            onSubmit={handleSubmit}
+            onSubmit={
+              handleSubmit
+            }
             className="space-y-6"
           >
             <div className="grid gap-5 sm:grid-cols-2">
@@ -337,13 +527,24 @@ function CadastroContent() {
                     type="text"
                     autoComplete="name"
                     value={name}
-                    onChange={(event) =>
-                      setName(event.target.value)
+                    onChange={(
+                      event
+                    ) =>
+                      setName(
+                        event
+                          .target
+                          .value
+                      )
                     }
                     placeholder="João Silva"
                     required
-                    maxLength={120}
-                    className="w-full rounded-xl border border-white/10 bg-[#091425] py-3.5 pl-11 pr-4 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-sky-400/60"
+                    maxLength={
+                      120
+                    }
+                    disabled={
+                      submitting
+                    }
+                    className="w-full rounded-xl border border-white/10 bg-[#091425] py-3.5 pl-11 pr-4 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-sky-400/60 disabled:cursor-not-allowed disabled:opacity-60"
                   />
                 </div>
               </div>
@@ -363,16 +564,27 @@ function CadastroContent() {
                     id="company"
                     type="text"
                     autoComplete="organization"
-                    value={companyName}
-                    onChange={(event) =>
+                    value={
+                      companyName
+                    }
+                    onChange={(
+                      event
+                    ) =>
                       setCompanyName(
-                        event.target.value
+                        event
+                          .target
+                          .value
                       )
                     }
                     placeholder="Nome da empresa"
                     required
-                    maxLength={160}
-                    className="w-full rounded-xl border border-white/10 bg-[#091425] py-3.5 pl-11 pr-4 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-sky-400/60"
+                    maxLength={
+                      160
+                    }
+                    disabled={
+                      submitting
+                    }
+                    className="w-full rounded-xl border border-white/10 bg-[#091425] py-3.5 pl-11 pr-4 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-sky-400/60 disabled:cursor-not-allowed disabled:opacity-60"
                   />
                 </div>
               </div>
@@ -394,13 +606,24 @@ function CadastroContent() {
                   type="email"
                   autoComplete="email"
                   value={email}
-                  onChange={(event) =>
-                    setEmail(event.target.value)
+                  onChange={(
+                    event
+                  ) =>
+                    setEmail(
+                      event
+                        .target
+                        .value
+                    )
                   }
                   placeholder="voce@empresa.com"
                   required
-                  maxLength={254}
-                  className="w-full rounded-xl border border-white/10 bg-[#091425] py-3.5 pl-11 pr-4 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-sky-400/60"
+                  maxLength={
+                    254
+                  }
+                  disabled={
+                    submitting
+                  }
+                  className="w-full rounded-xl border border-white/10 bg-[#091425] py-3.5 pl-11 pr-4 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-sky-400/60 disabled:cursor-not-allowed disabled:opacity-60"
                 />
               </div>
             </div>
@@ -425,16 +648,25 @@ function CadastroContent() {
                         : 'password'
                     }
                     autoComplete="new-password"
-                    value={password}
-                    onChange={(event) =>
+                    value={
+                      password
+                    }
+                    onChange={(
+                      event
+                    ) =>
                       setPassword(
-                        event.target.value
+                        event
+                          .target
+                          .value
                       )
                     }
                     placeholder="Mínimo 8 caracteres"
                     required
                     minLength={8}
-                    className="w-full rounded-xl border border-white/10 bg-[#091425] py-3.5 pl-11 pr-11 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-sky-400/60"
+                    disabled={
+                      submitting
+                    }
+                    className="w-full rounded-xl border border-white/10 bg-[#091425] py-3.5 pl-11 pr-11 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-sky-400/60 disabled:cursor-not-allowed disabled:opacity-60"
                   />
 
                   <button
@@ -444,12 +676,15 @@ function CadastroContent() {
                         !showPassword
                       )
                     }
+                    disabled={
+                      submitting
+                    }
                     aria-label={
                       showPassword
                         ? 'Ocultar senha'
                         : 'Mostrar senha'
                     }
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 transition hover:text-white"
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 transition hover:text-white disabled:cursor-not-allowed"
                   >
                     {showPassword ? (
                       <EyeOff className="h-4 w-4" />
@@ -479,16 +714,25 @@ function CadastroContent() {
                         : 'password'
                     }
                     autoComplete="new-password"
-                    value={confirmPassword}
-                    onChange={(event) =>
+                    value={
+                      confirmPassword
+                    }
+                    onChange={(
+                      event
+                    ) =>
                       setConfirmPassword(
-                        event.target.value
+                        event
+                          .target
+                          .value
                       )
                     }
                     placeholder="Repita sua senha"
                     required
                     minLength={8}
-                    className="w-full rounded-xl border border-white/10 bg-[#091425] py-3.5 pl-11 pr-4 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-sky-400/60"
+                    disabled={
+                      submitting
+                    }
+                    className="w-full rounded-xl border border-white/10 bg-[#091425] py-3.5 pl-11 pr-4 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-sky-400/60 disabled:cursor-not-allowed disabled:opacity-60"
                   />
                 </div>
               </div>
@@ -499,21 +743,27 @@ function CadastroContent() {
                 <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" />
 
                 <p className="text-xs leading-6 text-slate-400">
-                  Nenhuma cobrança é realizada nesta
-                  etapa. Seus dados de pagamento serão
-                  tratados com segurança na próxima
-                  etapa da contratação.
+                  Nenhuma cobrança é
+                  realizada nesta
+                  etapa. Seus dados
+                  de pagamento serão
+                  tratados com
+                  segurança na
+                  próxima etapa da
+                  contratação.
                 </p>
               </div>
             </div>
 
             <button
               type="submit"
-              disabled={submitting}
+              disabled={
+                submitting
+              }
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-sky-400 px-6 py-4 text-sm font-bold text-[#04101d] transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
             >
               {submitting
-                ? 'Continuando...'
+                ? 'Criando seu acesso...'
                 : 'Continuar para pagamento'}
 
               {!submitting && (
@@ -522,12 +772,14 @@ function CadastroContent() {
             </button>
 
             <p className="text-xs leading-5 text-slate-600">
-              Já possui uma conta?{' '}
+              Já possui uma
+              conta?{' '}
               <Link
                 href="/login"
                 className="font-semibold text-sky-400 hover:text-sky-300"
               >
-                Entrar no MirraCRM
+                Entrar no
+                MirraCRM
               </Link>
             </p>
           </form>
@@ -545,12 +797,18 @@ function CadastroContent() {
                 <div>
                   <h2 className="text-2xl font-semibold">
                     MirraCRM{' '}
-                    {selectedPlan.name}
+                    {
+                      selectedPlan.name
+                    }
                   </h2>
 
                   <p className="mt-2 text-sm text-slate-400">
-                    Até {selectedPlan.users}{' '}
-                    {selectedPlan.users === 1
+                    Até{' '}
+                    {
+                      selectedPlan.users
+                    }{' '}
+                    {selectedPlan.users ===
+                    1
                       ? 'usuário'
                       : 'usuários'}
                   </p>
@@ -568,7 +826,8 @@ function CadastroContent() {
             <div className="p-7">
               <div className="flex items-end justify-between gap-4">
                 <span className="text-sm text-slate-400">
-                  {cycle === 'annual'
+                  {cycle ===
+                  'annual'
                     ? 'Plano anual'
                     : 'Plano mensal'}
                 </span>
@@ -579,14 +838,18 @@ function CadastroContent() {
                   </p>
 
                   <p className="mt-1 text-xs text-slate-500">
-                    {cycleLabel}
+                    {
+                      cycleLabel
+                    }
                   </p>
                 </div>
               </div>
 
-              {cycle === 'annual' && (
+              {cycle ===
+                'annual' && (
                 <div className="mt-4 rounded-xl bg-emerald-400/[0.08] px-4 py-3 text-xs font-medium text-emerald-300">
-                  10% de desconto no plano anual
+                  10% de desconto
+                  no plano anual
                 </div>
               )}
 
@@ -599,18 +862,22 @@ function CadastroContent() {
                   'Funil de vendas',
                   'Gestão de leads',
                   'Dashboard comercial',
-                ].map((item) => (
-                  <div
-                    key={item}
-                    className="flex items-center gap-3 text-sm text-slate-300"
-                  >
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-400/10">
-                      <Check className="h-3 w-3 text-emerald-400" />
-                    </span>
+                ].map(
+                  (item) => (
+                    <div
+                      key={
+                        item
+                      }
+                      className="flex items-center gap-3 text-sm text-slate-300"
+                    >
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-400/10">
+                        <Check className="h-3 w-3 text-emerald-400" />
+                      </span>
 
-                    {item}
-                  </div>
-                ))}
+                      {item}
+                    </div>
+                  )
+                )}
               </div>
 
               <div className="mt-7 rounded-xl border border-sky-400/10 bg-sky-400/[0.05] p-4">
@@ -619,9 +886,12 @@ function CadastroContent() {
                 </p>
 
                 <p className="mt-2 text-xs leading-5 text-slate-400">
-                  A etapa de pagamento será
-                  configurada antes de ativarmos a
-                  contratação pública.
+                  Seu período de
+                  teste é de 13
+                  dias. A
+                  contratação será
+                  configurada na
+                  próxima etapa.
                 </p>
               </div>
             </div>
@@ -637,7 +907,8 @@ export default function CadastroPage() {
     <Suspense
       fallback={
         <main className="flex min-h-screen items-center justify-center bg-[#050d1a] text-sm text-slate-400">
-          Carregando contratação...
+          Carregando
+          contratação...
         </main>
       }
     >
