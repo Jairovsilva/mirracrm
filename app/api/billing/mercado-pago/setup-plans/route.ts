@@ -12,54 +12,77 @@ const ACCESS_TOKEN =
 const SETUP_SECRET =
   process.env.MERCADO_PAGO_SETUP_SECRET;
 
+type PlanKey =
+  | 'basic_monthly'
+  | 'pro_monthly';
+
 type PlanDefinition = {
-  key: string;
+  key: PlanKey;
   reason: string;
   frequency: number;
   frequencyType: 'months';
   amount: number;
 };
 
+type MercadoPagoPlan = {
+  id?: string;
+  reason?: string;
+  status?: string;
+
+  auto_recurring?: {
+    frequency?: number;
+    frequency_type?: string;
+    transaction_amount?:
+      | number
+      | string;
+    currency_id?: string;
+
+    free_trial?: {
+      frequency?: number;
+      frequency_type?: string;
+    };
+  };
+};
+
+type MercadoPagoSearchResponse = {
+  paging?: {
+    offset?: number;
+    limit?: number;
+    total?: number;
+  };
+
+  results?: MercadoPagoPlan[];
+
+  message?: string;
+  error?: string;
+};
+
+type MercadoPagoCreateResponse =
+  MercadoPagoPlan & {
+    message?: string;
+    error?: string;
+    cause?: unknown;
+  };
+
 const PLANS: PlanDefinition[] = [
   {
     key: 'basic_monthly',
-    reason: 'MirraCRM Basic - Mensal',
+    reason:
+      'MirraCRM Basic - Mensal',
     frequency: 1,
     frequencyType: 'months',
     amount: 499,
   },
-  {
-    key: 'basic_annual',
-    reason: 'MirraCRM Basic - Anual',
-    frequency: 12,
-    frequencyType: 'months',
-    amount: 5389.2,
-  },
+
   {
     key: 'pro_monthly',
-    reason: 'MirraCRM Pro - Mensal',
+    reason:
+      'MirraCRM Pro - Mensal',
     frequency: 1,
     frequencyType: 'months',
     amount: 1497,
   },
-  {
-    key: 'pro_annual',
-    reason: 'MirraCRM Pro - Anual',
-    frequency: 12,
-    frequencyType: 'months',
-    amount: 16167.6,
-  },
 ];
-
-type MercadoPagoPlanResponse = {
-  id?: string;
-  status?: string;
-  reason?: string;
-  init_point?: string;
-  message?: string;
-  error?: string;
-  cause?: unknown;
-};
 
 function json(
   body: Record<string, unknown>,
@@ -67,10 +90,208 @@ function json(
 ) {
   return NextResponse.json(body, {
     status,
+
     headers: {
       'Cache-Control': 'no-store',
     },
   });
+}
+
+function amountsEqual(
+  first: number | string | undefined,
+  second: number
+) {
+  if (first === undefined) {
+    return false;
+  }
+
+  const normalized =
+    typeof first === 'number'
+      ? first
+      : Number(first);
+
+  return (
+    Number.isFinite(normalized) &&
+    Math.abs(normalized - second) <
+      0.001
+  );
+}
+
+function isMatchingPlan(
+  existing: MercadoPagoPlan,
+  desired: PlanDefinition
+) {
+  const recurring =
+    existing.auto_recurring;
+
+  if (!recurring) {
+    return false;
+  }
+
+  return (
+    existing.reason ===
+      desired.reason &&
+    existing.status === 'active' &&
+    recurring.frequency ===
+      desired.frequency &&
+    recurring.frequency_type ===
+      desired.frequencyType &&
+    amountsEqual(
+      recurring.transaction_amount,
+      desired.amount
+    ) &&
+    recurring.currency_id === 'BRL'
+  );
+}
+
+async function searchPlans() {
+  const url =
+    new URL(
+      'https://api.mercadopago.com/preapproval_plan/search'
+    );
+
+  url.searchParams.set(
+    'status',
+    'active'
+  );
+
+  url.searchParams.set(
+    'sort',
+    'date_created'
+  );
+
+  url.searchParams.set(
+    'criteria',
+    'asc'
+  );
+
+  const response = await fetch(
+    url.toString(),
+    {
+      method: 'GET',
+
+      headers: {
+        Authorization:
+          `Bearer ${ACCESS_TOKEN}`,
+
+        'Content-Type':
+          'application/json',
+      },
+
+      cache: 'no-store',
+    }
+  );
+
+  let data:
+    | MercadoPagoSearchResponse
+    | null = null;
+
+  try {
+    data =
+      (await response.json()) as
+        MercadoPagoSearchResponse;
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    console.error(
+      'Falha ao consultar planos Mercado Pago:',
+      {
+        status: response.status,
+        response: data,
+      }
+    );
+
+    throw new Error(
+      `Mercado Pago recusou a consulta de planos (${response.status}).`
+    );
+  }
+
+  return Array.isArray(
+    data?.results
+  )
+    ? data.results
+    : [];
+}
+
+async function createPlan(
+  plan: PlanDefinition,
+  backUrl: string
+) {
+  const response = await fetch(
+    'https://api.mercadopago.com/preapproval_plan',
+    {
+      method: 'POST',
+
+      headers: {
+        Authorization:
+          `Bearer ${ACCESS_TOKEN}`,
+
+        'Content-Type':
+          'application/json',
+      },
+
+      body: JSON.stringify({
+        reason: plan.reason,
+
+        auto_recurring: {
+          frequency:
+            plan.frequency,
+
+          frequency_type:
+            plan.frequencyType,
+
+          transaction_amount:
+            plan.amount,
+
+          currency_id: 'BRL',
+
+          free_trial: {
+            frequency: 13,
+            frequency_type:
+              'days',
+          },
+        },
+
+        back_url: backUrl,
+      }),
+
+      cache: 'no-store',
+    }
+  );
+
+  let data:
+    | MercadoPagoCreateResponse
+    | null = null;
+
+  try {
+    data =
+      (await response.json()) as
+        MercadoPagoCreateResponse;
+  } catch {
+    data = null;
+  }
+
+  if (
+    !response.ok ||
+    !data?.id
+  ) {
+    console.error(
+      'Falha ao criar plano Mercado Pago:',
+      {
+        key: plan.key,
+        status: response.status,
+        response: data,
+      }
+    );
+
+    throw new Error(
+      `Falha ao criar o plano ${plan.key} (${response.status}).`
+    );
+  }
+
+  return data;
 }
 
 export async function POST(
@@ -80,6 +301,7 @@ export async function POST(
     return json(
       {
         ok: false,
+
         error:
           'MERCADO_PAGO_ACCESS_TOKEN não configurado.',
       },
@@ -91,6 +313,7 @@ export async function POST(
     return json(
       {
         ok: false,
+
         error:
           'MERCADO_PAGO_SETUP_SECRET não configurado.',
       },
@@ -99,7 +322,9 @@ export async function POST(
   }
 
   const authorization =
-    request.headers.get('authorization');
+    request.headers.get(
+      'authorization'
+    );
 
   const expectedAuthorization =
     `Bearer ${SETUP_SECRET}`;
@@ -111,146 +336,127 @@ export async function POST(
     return json(
       {
         ok: false,
-        error: 'Não autorizado.',
+        error:
+          'Não autorizado.',
       },
       401
     );
   }
 
-  const origin =
-    request.nextUrl.origin;
-
-  const backUrl =
-    `${origin}/cadastro/pagamento`;
-
-  const createdPlans: Array<{
-    key: string;
-    id: string;
-    status: string | null;
-    amount: number;
-    frequency: number;
-    frequencyType: string;
-  }> = [];
-
   try {
     /*
-     * IMPORTANTE:
+     * 1. Consulta primeiro os
+     * planos existentes.
      *
-     * Esta rota é para SETUP.
-     * Execute apenas uma vez.
+     * Isso impede a criação
+     * desnecessária de duplicatas.
+     */
+    let existingPlans =
+      await searchPlans();
+
+    const origin =
+      request.nextUrl.origin;
+
+    const backUrl =
+      `${origin}/cadastro/pagamento`;
+
+    const results: Array<{
+      key: PlanKey;
+      id: string;
+      action:
+        | 'existing'
+        | 'created';
+      amount: number;
+      trialDays: number;
+    }> = [];
+
+    /*
+     * 2. Processamos somente os
+     * planos MENSAIS.
      *
-     * Cada execução cria novos planos
-     * no Mercado Pago.
+     * Os planos anuais não são
+     * criados como preapproval_plan
+     * porque o Mercado Pago recusiu
+     * os valores acima do limite
+     * apresentado pela API.
      */
     for (const plan of PLANS) {
-      const response = await fetch(
-        'https://api.mercadopago.com/preapproval_plan',
-        {
-          method: 'POST',
-
-          headers: {
-            Authorization:
-              `Bearer ${ACCESS_TOKEN}`,
-
-            'Content-Type':
-              'application/json',
-          },
-
-          body: JSON.stringify({
-            reason: plan.reason,
-
-            auto_recurring: {
-              frequency:
-                plan.frequency,
-
-              frequency_type:
-                plan.frequencyType,
-
-              transaction_amount:
-                plan.amount,
-
-              currency_id: 'BRL',
-
-              free_trial: {
-                frequency: 13,
-                frequency_type:
-                  'days',
-              },
-            },
-
-            back_url: backUrl,
-          }),
-
-          cache: 'no-store',
-        }
-      );
-
-      let data:
-        | MercadoPagoPlanResponse
-        | null = null;
-
-      try {
-        data =
-          (await response.json()) as
-            MercadoPagoPlanResponse;
-      } catch {
-        data = null;
-      }
-
-      if (
-        !response.ok ||
-        !data?.id
-      ) {
-        console.error(
-          'Falha ao criar plano Mercado Pago:',
-          {
-            key: plan.key,
-            status:
-              response.status,
-            response: data,
-          }
+      const existing =
+        existingPlans.find(
+          (candidate) =>
+            isMatchingPlan(
+              candidate,
+              plan
+            )
         );
 
-        return json(
-          {
-            ok: false,
+      if (existing?.id) {
+        results.push({
+          key: plan.key,
+          id: existing.id,
+          action: 'existing',
+          amount: plan.amount,
+          trialDays: 13,
+        });
 
-            error:
-              `Falha ao criar o plano ${plan.key}.`,
+        continue;
+      }
 
-            mercadoPagoStatus:
-              response.status,
+      /*
+       * Não encontramos um plano
+       * compatível. Criamos agora.
+       */
+      const created =
+        await createPlan(
+          plan,
+          backUrl
+        );
 
-            mercadoPagoResponse:
-              data,
-          },
-          502
+      if (!created.id) {
+        throw new Error(
+          `Mercado Pago não retornou ID para ${plan.key}.`
         );
       }
 
-      createdPlans.push({
+      results.push({
         key: plan.key,
-        id: data.id,
-        status:
-          data.status ?? null,
+        id: created.id,
+        action: 'created',
         amount: plan.amount,
-        frequency:
-          plan.frequency,
-        frequencyType:
-          plan.frequencyType,
+        trialDays: 13,
       });
+
+      /*
+       * Adicionamos o recém-criado
+       * à lista local para manter
+       * esta própria execução
+       * consistente.
+       */
+      existingPlans = [
+        ...existingPlans,
+        created,
+      ];
     }
 
     return json({
       ok: true,
 
       message:
-        'Planos criados no Mercado Pago.',
+        'Planos mensais do MirraCRM verificados.',
 
-      warning:
-        'Guarde os IDs e desative/remova esta rota após concluir o setup.',
+      plans: results,
 
-      plans: createdPlans,
+      annual: {
+        basic: {
+          amount: 5389.2,
+          recurringPlan: false,
+        },
+
+        pro: {
+          amount: 16167.6,
+          recurringPlan: false,
+        },
+      },
     });
   } catch (error) {
     console.error(
@@ -261,10 +467,13 @@ export async function POST(
     return json(
       {
         ok: false,
+
         error:
-          'Não foi possível concluir o setup dos planos.',
+          error instanceof Error
+            ? error.message
+            : 'Não foi possível concluir o setup dos planos.',
       },
-      500
+      502
     );
   }
 }
