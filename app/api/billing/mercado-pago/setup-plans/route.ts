@@ -1,20 +1,12 @@
-import {
-  NextRequest,
-  NextResponse,
-} from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const ACCESS_TOKEN =
-  process.env.MERCADO_PAGO_ACCESS_TOKEN;
+const ACCESS_TOKEN = process.env.MERCADO_PAGO_ACCESS_TOKEN;
+const SETUP_SECRET = process.env.MERCADO_PAGO_SETUP_SECRET;
 
-const SETUP_SECRET =
-  process.env.MERCADO_PAGO_SETUP_SECRET;
-
-type PlanKey =
-  | 'basic_monthly'
-  | 'pro_monthly';
+type PlanKey = 'basic_monthly' | 'pro_monthly';
 
 type PlanDefinition = {
   key: PlanKey;
@@ -32,9 +24,7 @@ type MercadoPagoPlan = {
   auto_recurring?: {
     frequency?: number;
     frequency_type?: string;
-    transaction_amount?:
-      | number
-      | string;
+    transaction_amount?: number | string;
     currency_id?: string;
 
     free_trial?: {
@@ -57,27 +47,23 @@ type MercadoPagoSearchResponse = {
   error?: string;
 };
 
-type MercadoPagoCreateResponse =
-  MercadoPagoPlan & {
-    message?: string;
-    error?: string;
-    cause?: unknown;
-  };
+type MercadoPagoCreateResponse = MercadoPagoPlan & {
+  message?: string;
+  error?: string;
+  cause?: unknown;
+};
 
 const PLANS: PlanDefinition[] = [
   {
     key: 'basic_monthly',
-    reason:
-      'MirraCRM Basic - Mensal',
+    reason: 'MirraCRM Basic - Mensal',
     frequency: 1,
     frequencyType: 'months',
     amount: 499,
   },
-
   {
     key: 'pro_monthly',
-    reason:
-      'MirraCRM Pro - Mensal',
+    reason: 'MirraCRM Pro - Mensal',
     frequency: 1,
     frequencyType: 'months',
     amount: 1497,
@@ -90,7 +76,6 @@ function json(
 ) {
   return NextResponse.json(body, {
     status,
-
     headers: {
       'Cache-Control': 'no-store',
     },
@@ -112,8 +97,7 @@ function amountsEqual(
 
   return (
     Number.isFinite(normalized) &&
-    Math.abs(normalized - second) <
-      0.001
+    Math.abs(normalized - second) < 0.001
   );
 }
 
@@ -121,21 +105,17 @@ function isMatchingPlan(
   existing: MercadoPagoPlan,
   desired: PlanDefinition
 ) {
-  const recurring =
-    existing.auto_recurring;
+  const recurring = existing.auto_recurring;
 
   if (!recurring) {
     return false;
   }
 
   return (
-    existing.reason ===
-      desired.reason &&
+    existing.reason === desired.reason &&
     existing.status === 'active' &&
-    recurring.frequency ===
-      desired.frequency &&
-    recurring.frequency_type ===
-      desired.frequencyType &&
+    recurring.frequency === desired.frequency &&
+    recurring.frequency_type === desired.frequencyType &&
     amountsEqual(
       recurring.transaction_amount,
       desired.amount
@@ -144,52 +124,31 @@ function isMatchingPlan(
   );
 }
 
-async function searchPlans() {
-  const url =
-    new URL(
-      'https://api.mercadopago.com/preapproval_plan/search'
-    );
-
-  url.searchParams.set(
-    'status',
-    'active'
+async function searchPlans(): Promise<MercadoPagoPlan[]> {
+  const url = new URL(
+    'https://api.mercadopago.com/preapproval_plan/search'
   );
 
-  url.searchParams.set(
-    'sort',
-    'date_created'
-  );
+  url.searchParams.set('status', 'active');
+  url.searchParams.set('sort', 'date_created');
+  url.searchParams.set('criteria', 'asc');
 
-  url.searchParams.set(
-    'criteria',
-    'asc'
-  );
+  const response = await fetch(url.toString(), {
+    method: 'GET',
 
-  const response = await fetch(
-    url.toString(),
-    {
-      method: 'GET',
+    headers: {
+      Authorization: `Bearer ${ACCESS_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
 
-      headers: {
-        Authorization:
-          `Bearer ${ACCESS_TOKEN}`,
+    cache: 'no-store',
+  });
 
-        'Content-Type':
-          'application/json',
-      },
-
-      cache: 'no-store',
-    }
-  );
-
-  let data:
-    | MercadoPagoSearchResponse
-    | null = null;
+  let data: MercadoPagoSearchResponse | null = null;
 
   try {
     data =
-      (await response.json()) as
-        MercadoPagoSearchResponse;
+      (await response.json()) as MercadoPagoSearchResponse;
   } catch {
     data = null;
   }
@@ -208,49 +167,46 @@ async function searchPlans() {
     );
   }
 
-  return Array.isArray(
-    data?.results
-  )
-    ? data.results
+  /*
+   * IMPORTANTE:
+   * Guardamos results em uma variável antes
+   * da validação para que o TypeScript faça
+   * corretamente o narrowing quando data
+   * puder ser null.
+   */
+  const results = data?.results;
+
+  return Array.isArray(results)
+    ? results
     : [];
 }
 
 async function createPlan(
   plan: PlanDefinition,
   backUrl: string
-) {
+): Promise<MercadoPagoCreateResponse> {
   const response = await fetch(
     'https://api.mercadopago.com/preapproval_plan',
     {
       method: 'POST',
 
       headers: {
-        Authorization:
-          `Bearer ${ACCESS_TOKEN}`,
-
-        'Content-Type':
-          'application/json',
+        Authorization: `Bearer ${ACCESS_TOKEN}`,
+        'Content-Type': 'application/json',
       },
 
       body: JSON.stringify({
         reason: plan.reason,
 
         auto_recurring: {
-          frequency:
-            plan.frequency,
-
-          frequency_type:
-            plan.frequencyType,
-
-          transaction_amount:
-            plan.amount,
-
+          frequency: plan.frequency,
+          frequency_type: plan.frequencyType,
+          transaction_amount: plan.amount,
           currency_id: 'BRL',
 
           free_trial: {
             frequency: 13,
-            frequency_type:
-              'days',
+            frequency_type: 'days',
           },
         },
 
@@ -261,22 +217,16 @@ async function createPlan(
     }
   );
 
-  let data:
-    | MercadoPagoCreateResponse
-    | null = null;
+  let data: MercadoPagoCreateResponse | null = null;
 
   try {
     data =
-      (await response.json()) as
-        MercadoPagoCreateResponse;
+      (await response.json()) as MercadoPagoCreateResponse;
   } catch {
     data = null;
   }
 
-  if (
-    !response.ok ||
-    !data?.id
-  ) {
+  if (!response.ok || !data?.id) {
     console.error(
       'Falha ao criar plano Mercado Pago:',
       {
@@ -297,11 +247,14 @@ async function createPlan(
 export async function POST(
   request: NextRequest
 ) {
+  /*
+   * Essas variáveis são verificadas
+   * antes de qualquer chamada externa.
+   */
   if (!ACCESS_TOKEN) {
     return json(
       {
         ok: false,
-
         error:
           'MERCADO_PAGO_ACCESS_TOKEN não configurado.',
       },
@@ -313,7 +266,6 @@ export async function POST(
     return json(
       {
         ok: false,
-
         error:
           'MERCADO_PAGO_SETUP_SECRET não configurado.',
       },
@@ -321,23 +273,21 @@ export async function POST(
     );
   }
 
+  /*
+   * Endpoint administrativo temporário.
+   * O segredo nunca é enviado ao Mercado Pago.
+   */
   const authorization =
-    request.headers.get(
-      'authorization'
-    );
+    request.headers.get('authorization');
 
   const expectedAuthorization =
     `Bearer ${SETUP_SECRET}`;
 
-  if (
-    authorization !==
-    expectedAuthorization
-  ) {
+  if (authorization !== expectedAuthorization) {
     return json(
       {
         ok: false,
-        error:
-          'Não autorizado.',
+        error: 'Não autorizado.',
       },
       401
     );
@@ -345,17 +295,14 @@ export async function POST(
 
   try {
     /*
-     * 1. Consulta primeiro os
-     * planos existentes.
+     * Primeiro consultamos o Mercado Pago.
      *
-     * Isso impede a criação
-     * desnecessária de duplicatas.
+     * Isso evita recriar deliberadamente
+     * um plano que já existe.
      */
-    let existingPlans =
-      await searchPlans();
+    let existingPlans = await searchPlans();
 
-    const origin =
-      request.nextUrl.origin;
+    const origin = request.nextUrl.origin;
 
     const backUrl =
       `${origin}/cadastro/pagamento`;
@@ -363,31 +310,23 @@ export async function POST(
     const results: Array<{
       key: PlanKey;
       id: string;
-      action:
-        | 'existing'
-        | 'created';
+      action: 'existing' | 'created';
       amount: number;
       trialDays: number;
     }> = [];
 
     /*
-     * 2. Processamos somente os
-     * planos MENSAIS.
+     * Criamos somente os planos MENSAIS.
      *
-     * Os planos anuais não são
-     * criados como preapproval_plan
-     * porque o Mercado Pago recusiu
-     * os valores acima do limite
-     * apresentado pela API.
+     * Basic anual e Pro anual ficam fora
+     * de preapproval_plan porque a API
+     * retornou o limite de R$ 4.000 para
+     * a cobrança testada.
      */
     for (const plan of PLANS) {
       const existing =
-        existingPlans.find(
-          (candidate) =>
-            isMatchingPlan(
-              candidate,
-              plan
-            )
+        existingPlans.find((candidate) =>
+          isMatchingPlan(candidate, plan)
         );
 
       if (existing?.id) {
@@ -403,15 +342,17 @@ export async function POST(
       }
 
       /*
-       * Não encontramos um plano
-       * compatível. Criamos agora.
+       * Não encontramos um plano ativo
+       * exatamente compatível.
        */
       const created =
-        await createPlan(
-          plan,
-          backUrl
-        );
+        await createPlan(plan, backUrl);
 
+      /*
+       * createPlan já garante que existe
+       * um ID antes de retornar, mas
+       * mantemos a proteção também aqui.
+       */
       if (!created.id) {
         throw new Error(
           `Mercado Pago não retornou ID para ${plan.key}.`
@@ -427,10 +368,8 @@ export async function POST(
       });
 
       /*
-       * Adicionamos o recém-criado
-       * à lista local para manter
-       * esta própria execução
-       * consistente.
+       * Mantemos a lista local atualizada
+       * durante esta mesma execução.
        */
       existingPlans = [
         ...existingPlans,
@@ -446,6 +385,13 @@ export async function POST(
 
       plans: results,
 
+      /*
+       * Mantemos os valores anuais na
+       * resposta apenas como informação.
+       *
+       * Nenhum preapproval_plan anual
+       * é criado por esta rota.
+       */
       annual: {
         basic: {
           amount: 5389.2,
