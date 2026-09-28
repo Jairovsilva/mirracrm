@@ -226,9 +226,13 @@ export default function PaymentPage() {
     billingCycle === 'annual';
 
   const amount =
-    planId === 'basic'
-      ? '499'
-      : '1497';
+    isAnnual
+      ? planId === 'basic'
+        ? '5389.20'
+        : '16167.60'
+      : planId === 'basic'
+        ? '499'
+        : '1497';
 
   const publicKey =
     process.env
@@ -246,7 +250,6 @@ export default function PaymentPage() {
   useEffect(() => {
     if (
       !sdkReady ||
-      isAnnual ||
       initializedRef.current
     ) {
       return;
@@ -458,31 +461,75 @@ export default function PaymentPage() {
                   );
                 }
 
-                const response =
-                  await fetch(
-                    '/api/billing/mercado-pago/subscriptions',
-                    {
-                      method: 'POST',
+                const paymentMethodId =
+                  cardData?.paymentMethodId;
 
-                      headers: {
-                        'Content-Type':
-                          'application/json',
+                const installments =
+                  Number(cardData?.installments || '1');
 
-                        Authorization:
-                          `Bearer ${accessToken}`,
-                      },
+                const payerEmail =
+                  cardData?.cardholderEmail?.trim();
 
-                      body:
-                        JSON.stringify({
-                          planId,
+                const identificationType =
+                  cardData?.identificationType?.trim();
 
-                          billingCycle:
-                            'monthly',
+                const identificationNumber =
+                  cardData?.identificationNumber?.trim();
 
-                          cardTokenId,
-                        }),
-                    }
+                const issuerId =
+                  cardData?.issuerId?.trim();
+
+                if (
+                  isAnnual &&
+                  (!paymentMethodId ||
+                    !payerEmail ||
+                    !Number.isInteger(installments) ||
+                    installments <= 0)
+                ) {
+                  throw new Error(
+                    'Não foi possível validar os dados do pagamento anual. Confira os campos e tente novamente.'
                   );
+                }
+
+                const endpoint = isAnnual
+                  ? '/api/billing/mercado-pago/annual-payment'
+                  : '/api/billing/mercado-pago/subscriptions';
+
+                const requestBody = isAnnual
+                  ? {
+                      planId,
+                      billingCycle: 'annual',
+                      cardTokenId,
+                      paymentMethodId,
+                      installments,
+                      payerEmail,
+                      identificationType,
+                      identificationNumber,
+                      issuerId,
+                    }
+                  : {
+                      planId,
+                      billingCycle: 'monthly',
+                      cardTokenId,
+                    };
+
+                const response =
+                  await fetch(endpoint, {
+                    method: 'POST',
+
+                    headers: {
+                      'Content-Type':
+                        'application/json',
+
+                      Authorization:
+                        `Bearer ${accessToken}`,
+                    },
+
+                    body:
+                      JSON.stringify(
+                        requestBody
+                      ),
+                  });
 
                 let result:
                   | {
@@ -668,10 +715,9 @@ export default function PaymentPage() {
                 </h1>
 
                 <p className="mt-4 max-w-xl text-base leading-7 text-slate-400">
-                  Você terá 13 dias para
-                  usar o MirraCRM antes do
-                  início da cobrança
-                  recorrente.
+                  {isAnnual
+                    ? 'No plano anual, o pagamento é realizado em uma única cobrança para 12 meses de acesso.'
+                    : 'Você terá 13 dias para usar o MirraCRM antes do início da cobrança recorrente.'}
                 </p>
 
                 <div className="mt-8 rounded-2xl border border-white/10 bg-white/[0.04] p-6">
@@ -709,7 +755,8 @@ export default function PaymentPage() {
                   <div className="my-6 h-px bg-white/10" />
 
                   <div className="space-y-3 text-sm text-slate-300">
-                    <div className="flex items-center gap-3">
+                    {!isAnnual && (
+                      <div className="flex items-center gap-3">
                       <Check
                         size={17}
                         className="text-cyan-400"
@@ -717,7 +764,8 @@ export default function PaymentPage() {
 
                       13 dias de teste
                       grátis
-                    </div>
+                      </div>
+                    )}
 
                     {!isAnnual && (
                       <div className="flex items-center gap-3">
@@ -760,40 +808,8 @@ export default function PaymentPage() {
               </section>
 
               <section className="rounded-3xl border border-white/10 bg-white/[0.055] p-5 shadow-2xl shadow-black/20 sm:p-8">
-                {isAnnual ? (
-                  <div className="flex min-h-[430px] flex-col items-center justify-center text-center">
-                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-cyan-400/10 text-cyan-300">
-                      <CreditCard
-                        size={26}
-                      />
-                    </div>
+                <>
 
-                    <h2 className="mt-5 text-xl font-semibold">
-                      Pagamento anual
-                    </h2>
-
-                    <p className="mt-3 max-w-md text-sm leading-6 text-slate-400">
-                      O pagamento anual
-                      será disponibilizado
-                      em um fluxo separado.
-                      Nenhuma cobrança será
-                      realizada nesta tela.
-                    </p>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        router.push(
-                          `/cadastro/pagamento?plan=${planId}&cycle=monthly`
-                        )
-                      }
-                      className="mt-7 rounded-xl bg-cyan-400 px-5 py-3 text-sm font-semibold text-[#07111f] transition hover:bg-cyan-300"
-                    >
-                      Escolher mensal
-                    </button>
-                  </div>
-                ) : (
-                  <>
                     <div className="mb-7">
                       <p className="text-sm font-medium text-cyan-300">
                         Cartão de crédito
@@ -804,11 +820,9 @@ export default function PaymentPage() {
                       </h2>
 
                       <p className="mt-2 text-sm leading-6 text-slate-400">
-                        Nenhuma cobrança
-                        será feita hoje. A
-                        primeira cobrança
-                        ocorrerá após o
-                        período de teste.
+                        {isAnnual
+                          ? `Cobrança única de ${plan.annualPrice} para 12 meses de acesso.`
+                          : 'Nenhuma cobrança será feita hoje. A primeira cobrança ocorrerá após o período de teste.'}
                       </p>
                     </div>
 
@@ -978,8 +992,9 @@ export default function PaymentPage() {
                               className="animate-spin"
                             />
 
-                            Configurando
-                            assinatura...
+                            {isAnnual
+                              ? 'Processando pagamento...'
+                              : 'Configurando assinatura...'}
                           </>
                         ) : (
                           <>
@@ -987,8 +1002,9 @@ export default function PaymentPage() {
                               size={17}
                             />
 
-                            Iniciar 13 dias
-                            grátis
+                            {isAnnual
+                              ? `Pagar ${plan.annualPrice}`
+                              : 'Iniciar 13 dias grátis'}
                           </>
                         )}
                       </button>
@@ -1004,7 +1020,6 @@ export default function PaymentPage() {
                       Mercado Pago
                     </div>
                   </>
-                )}
               </section>
             </div>
           </div>
