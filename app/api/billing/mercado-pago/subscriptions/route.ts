@@ -23,11 +23,8 @@ const MERCADO_PAGO_ACCESS_TOKEN =
   process.env.MERCADO_PAGO_ACCESS_TOKEN;
 
 /*
- * IDs criados e confirmados no
- * Mercado Pago em ambiente de teste.
- *
- * Basic mensal: R$ 499
- * Pro mensal: R$ 1.497
+ * IDs dos planos mensais já criados
+ * e confirmados no Mercado Pago.
  */
 const MERCADO_PAGO_PLAN_IDS = {
   basic:
@@ -120,7 +117,7 @@ export async function POST(
   request: NextRequest
 ) {
   /*
-   * 1. Verificação de configuração.
+   * 1. Configuração obrigatória.
    */
   if (
     !SUPABASE_URL ||
@@ -151,7 +148,7 @@ export async function POST(
   }
 
   /*
-   * 2. Usuário precisa estar
+   * 2. O usuário precisa estar
    * autenticado no MirraCRM.
    */
   const accessToken =
@@ -206,11 +203,11 @@ export async function POST(
   }
 
   /*
-   * 3. Lemos somente os campos
-   * necessários.
+   * 3. Lemos apenas o token do cartão,
+   * plano e ciclo.
    *
-   * Nunca recebemos número do cartão,
-   * CVV ou validade nesta API.
+   * Número do cartão, CVV e validade
+   * nunca devem chegar nesta API.
    */
   let body: RequestBody;
 
@@ -258,10 +255,8 @@ export async function POST(
   }
 
   /*
-   * Esta API é exclusivamente
-   * para recorrência mensal.
-   *
-   * O anual terá fluxo próprio.
+   * Esta rota é exclusivamente para
+   * Basic/Pro mensal.
    */
   if (
     billingCycle !== 'monthly'
@@ -288,8 +283,8 @@ export async function POST(
   }
 
   /*
-   * Limite defensivo.
-   * O token é opaco para o MirraCRM.
+   * Proteção simples para um valor
+   * opaco inesperadamente grande.
    */
   if (cardTokenId.length > 500) {
     return json(
@@ -316,19 +311,14 @@ export async function POST(
 
   /*
    * 4. Descobrimos a conta de billing
-   * exclusivamente pelo usuário
-   * autenticado.
-   *
-   * O frontend não escolhe account_id.
+   * pelo usuário autenticado.
    */
   const {
     data: membership,
     error: membershipError,
   } = await admin
     .from('billing_memberships')
-    .select(
-      'billing_account_id'
-    )
+    .select('billing_account_id')
     .eq('user_id', user.id)
     .maybeSingle();
 
@@ -355,8 +345,13 @@ export async function POST(
     membership.billing_account_id;
 
   /*
-   * 5. Conferimos a assinatura interna
-   * atual antes de conversar com o MP.
+   * 5. Carregamos a assinatura interna.
+   *
+   * IMPORTANTE:
+   * select agora é uma STRING LITERAL.
+   *
+   * Isso permite ao supabase-js inferir
+   * corretamente as propriedades.
    */
   const {
     data: internalSubscription,
@@ -364,17 +359,7 @@ export async function POST(
   } = await admin
     .from('billing_subscriptions')
     .select(
-      [
-        'id',
-        'billing_account_id',
-        'plan_id',
-        'status',
-        'billing_cycle',
-        'trial_starts_at',
-        'trial_ends_at',
-        'provider',
-        'provider_subscription_id',
-      ].join(',')
+      'id, billing_account_id, plan_id, status, billing_cycle, trial_starts_at, trial_ends_at, provider, provider_subscription_id'
     )
     .eq(
       'billing_account_id',
@@ -402,12 +387,9 @@ export async function POST(
   }
 
   /*
-   * Se já existe uma assinatura
-   * Mercado Pago vinculada, não criamos
-   * outra automaticamente.
-   *
-   * Isso evita duas recorrências para
-   * a mesma conta.
+   * Uma conta não pode receber uma
+   * segunda assinatura recorrente
+   * automaticamente.
    */
   if (
     internalSubscription
@@ -416,8 +398,10 @@ export async function POST(
     return json(
       {
         ok: false,
+
         error:
           'Esta conta já possui uma assinatura de pagamento vinculada.',
+
         code:
           'SUBSCRIPTION_ALREADY_LINKED',
       },
@@ -426,11 +410,8 @@ export async function POST(
   }
 
   /*
-   * 6. Confirmamos que o plano existe
-   * no nosso próprio banco.
-   *
-   * Não confiamos apenas no parâmetro
-   * enviado pelo navegador.
+   * 6. Validamos o plano no nosso
+   * próprio banco.
    */
   const {
     data: billingPlan,
@@ -464,9 +445,8 @@ export async function POST(
   }
 
   /*
-   * Proteção adicional para impedir
-   * divergência silenciosa entre
-   * Supabase e Mercado Pago.
+   * O preço que chega ao Mercado Pago
+   * nunca é escolhido pelo navegador.
    */
   const expectedAmountCents =
     planId === 'basic'
@@ -482,9 +462,11 @@ export async function POST(
       'Preço interno divergente do Mercado Pago:',
       {
         planId,
+
         databaseAmount:
           billingPlan
             .monthly_price_cents,
+
         expectedAmount:
           expectedAmountCents,
       }
@@ -502,10 +484,7 @@ export async function POST(
 
   /*
    * 7. Criamos/reutilizamos a ordem
-   * interna ANTES da assinatura externa.
-   *
-   * O UUID da ordem será nossa
-   * external_reference.
+   * interna.
    */
   const {
     data: orderResult,
@@ -550,10 +529,8 @@ export async function POST(
   }
 
   /*
-   * O RPC pode retornar uma linha,
-   * um array com uma linha ou,
-   * dependendo da assinatura SQL,
-   * diretamente um objeto.
+   * Compatibilidade com RPC que
+   * retorna linha ou array.
    */
   const order =
     Array.isArray(orderResult)
@@ -562,6 +539,8 @@ export async function POST(
 
   if (
     !order ||
+    typeof order !== 'object' ||
+    !('id' in order) ||
     typeof order.id !== 'string'
   ) {
     console.error(
@@ -582,12 +561,7 @@ export async function POST(
   const orderId = order.id;
 
   /*
-   * 8. Criamos a assinatura no
-   * Mercado Pago.
-   *
-   * O cartão já deve ter sido
-   * tokenizado pelo MercadoPago.js
-   * no navegador.
+   * 8. Criamos a assinatura externa.
    */
   const mercadoPagoPlanId =
     MERCADO_PAGO_PLAN_IDS[planId];
@@ -605,13 +579,6 @@ export async function POST(
           'Content-Type':
             'application/json',
 
-          /*
-           * Evita que uma repetição
-           * acidental da mesma ordem
-           * seja tratada como uma
-           * nova intenção pelo nosso
-           * lado da integração.
-           */
           'X-Idempotency-Key':
             orderId,
         },
@@ -682,11 +649,7 @@ export async function POST(
   }
 
   /*
-   * 9. Verificação defensiva.
-   *
-   * Uma assinatura criada para outro
-   * plano não pode ser vinculada
-   * silenciosamente à nossa conta.
+   * 9. Confirmação defensiva do plano.
    */
   if (
     mercadoPago
@@ -721,14 +684,11 @@ export async function POST(
   }
 
   /*
-   * 10. Persistimos o vínculo.
+   * 10. Vinculamos a assinatura do
+   * Mercado Pago à assinatura interna.
    *
-   * IMPORTANTE:
-   * não mudamos o status interno para
-   * "active".
-   *
-   * O usuário continua "trialing"
-   * durante os 13 dias.
+   * Não transformamos trialing em
+   * active aqui.
    */
   const {
     data: updatedSubscription,
@@ -760,15 +720,7 @@ export async function POST(
       null
     )
     .select(
-      [
-        'id',
-        'plan_id',
-        'status',
-        'billing_cycle',
-        'trial_ends_at',
-        'provider',
-        'provider_subscription_id',
-      ].join(',')
+      'id, plan_id, status, billing_cycle, trial_ends_at, provider, provider_subscription_id'
     )
     .maybeSingle();
 
@@ -777,21 +729,20 @@ export async function POST(
     !updatedSubscription
   ) {
     /*
-     * Situação importante:
-     * o Mercado Pago já criou a
-     * assinatura, portanto NÃO devemos
-     * tentar criar outra automaticamente.
+     * A assinatura externa já existe.
      *
-     * O ID fica registrado no log para
-     * reconciliação administrativa.
+     * NÃO devemos criar outra
+     * automaticamente.
      */
     console.error(
       'ASSINATURA_MP_CRIADA_MAS_NAO_VINCULADA:',
       {
         billingAccountId,
         orderId,
+
         providerSubscriptionId:
           mercadoPago.id,
+
         error:
           updateSubscriptionError,
       }
@@ -812,13 +763,8 @@ export async function POST(
   }
 
   /*
-   * 11. Registramos na ordem qual
-   * assinatura externa foi criada.
-   *
-   * provider_checkout_id é o campo
-   * disponível no schema para o
-   * identificador externo relacionado
-   * à criação desta ordem.
+   * 11. Relacionamos a ordem interna
+   * com a assinatura externa.
    */
   const {
     error: updateOrderError,
@@ -835,16 +781,18 @@ export async function POST(
 
   if (updateOrderError) {
     /*
-     * Não desfazemos a assinatura:
-     * o vínculo principal já está salvo
+     * Não desfazemos a assinatura.
+     * O vínculo principal já foi salvo
      * em billing_subscriptions.
      */
     console.error(
       'Assinatura vinculada, mas billing_order não foi atualizada:',
       {
         orderId,
+
         providerSubscriptionId:
           mercadoPago.id,
+
         error:
           updateOrderError,
       }
@@ -860,7 +808,8 @@ export async function POST(
           updatedSubscription.id,
 
         planId:
-          updatedSubscription.plan_id,
+          updatedSubscription
+            .plan_id,
 
         billingCycle:
           updatedSubscription
