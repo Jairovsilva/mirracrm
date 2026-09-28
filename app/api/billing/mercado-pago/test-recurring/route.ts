@@ -31,10 +31,10 @@ export async function POST(
   request: NextRequest
 ) {
   /*
-   * Esta rota existe exclusivamente
-   * para testes no ambiente Preview.
+   * Rota temporária exclusiva
+   * para ambiente Preview.
    *
-   * Nunca deve funcionar em produção.
+   * Nunca funciona em produção.
    */
   if (
     process.env.VERCEL_ENV ===
@@ -108,27 +108,21 @@ export async function POST(
     }
 
     /*
-     * Assinatura descartável utilizada
-     * exclusivamente para validar o
-     * ciclo real de cobrança recorrente
-     * do Mercado Pago.
+     * Assinatura descartável usada
+     * somente para testar uma cobrança
+     * recorrente real do Mercado Pago.
      *
-     * IMPORTANTE:
-     * - não possui free_trial;
-     * - não utiliza o plano Basic real;
-     * - não utiliza o plano Pro real;
-     * - valor de teste: R$ 10,00;
-     * - não altera a assinatura normal
-     *   já criada no MirraCRM.
+     * - Sem free trial
+     * - Sem plano Basic
+     * - Sem plano Pro
+     * - R$ 10,00
+     * - Mensal
      */
-
     const now =
       Date.now();
 
     /*
-     * Início alguns minutos à frente
-     * para evitar problemas de relógio
-     * entre Vercel e Mercado Pago.
+     * Começa alguns minutos à frente.
      */
     const startDate =
       new Date(
@@ -137,8 +131,7 @@ export async function POST(
       ).toISOString();
 
     /*
-     * Assinatura de teste válida por
-     * aproximadamente 1 ano.
+     * Vigência aproximada de um ano.
      */
     const endDate =
       new Date(
@@ -171,22 +164,28 @@ export async function POST(
 
             'X-Idempotency-Key':
               idempotencyKey,
+
+            /*
+             * Header utilizado pelo
+             * Mercado Pago no exemplo
+             * oficial do ambiente
+             * de teste deste fluxo.
+             */
+            'X-scope':
+              'stage',
           },
 
           cache: 'no-store',
 
           body: JSON.stringify({
+            back_url:
+              'https://develop-mirracrm.vercel.app/cadastro/pagamento/teste-recorrencia',
+
             reason:
               'MirraCRM - Teste tecnico recorrencia',
 
             external_reference:
               externalReference,
-
-            payer_email:
-              payerEmail,
-
-            card_token_id:
-              cardTokenId,
 
             auto_recurring: {
               frequency: 1,
@@ -207,8 +206,11 @@ export async function POST(
                 'BRL',
             },
 
-            back_url:
-              'https://develop-mirracrm.vercel.app/cadastro/pagamento/teste-recorrencia',
+            payer_email:
+              payerEmail,
+
+            card_token_id:
+              cardTokenId,
 
             status:
               'authorized',
@@ -237,13 +239,13 @@ export async function POST(
     }
 
     /*
-     * Nunca registramos:
+     * Não registramos:
      * - Access Token
-     * - cardTokenId
-     * - Authorization header
+     * - Card Token
+     * - Authorization
      *
-     * Apenas a resposta de erro
-     * fornecida pelo Mercado Pago.
+     * Apenas a resposta devolvida
+     * pelo Mercado Pago.
      */
     if (
       !mercadoPagoResponse.ok
@@ -316,12 +318,12 @@ export async function POST(
     }
 
     /*
-     * Não devolvemos nenhum dado
-     * sensível para o navegador.
-     *
      * subscriptionId e
      * externalReference são
-     * identificadores, não credenciais.
+     * identificadores.
+     *
+     * Nenhuma credencial é
+     * devolvida ao navegador.
      */
     return NextResponse.json(
       {
@@ -342,13 +344,25 @@ export async function POST(
 
         test: {
           amount: 10,
-          currency: 'BRL',
-          frequency: 1,
+
+          currency:
+            'BRL',
+
+          frequency:
+            1,
+
           frequencyType:
             'months',
+
           startDate,
+
           endDate,
-          freeTrial: false,
+
+          freeTrial:
+            false,
+
+          scope:
+            'stage',
         },
       },
       {
