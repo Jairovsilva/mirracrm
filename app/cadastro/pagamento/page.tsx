@@ -176,6 +176,7 @@ function getErrorMessage(
 
 export default function PaymentPage() {
   const router = useRouter();
+
   const searchParams =
     useSearchParams();
 
@@ -215,7 +216,8 @@ export default function PaymentPage() {
       ? 'annual'
       : 'monthly';
 
-  const plan = PLANS[planId];
+  const plan =
+    PLANS[planId];
 
   const isAnnual =
     billingCycle === 'annual';
@@ -225,9 +227,18 @@ export default function PaymentPage() {
       ? '499'
       : '1497';
 
+  /*
+   * A Public Key é incorporada ao
+   * frontend pelo Next.js.
+   *
+   * trim() remove somente espaços,
+   * tabs ou quebras de linha existentes
+   * no início/final do valor.
+   */
   const publicKey =
     process.env
-      .NEXT_PUBLIC_MERCADO_PAGO_PUBLIC_KEY;
+      .NEXT_PUBLIC_MERCADO_PAGO_PUBLIC_KEY
+      ?.trim();
 
   const supabaseUrl =
     process.env
@@ -237,6 +248,43 @@ export default function PaymentPage() {
     process.env
       .NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
+  /*
+   * DIAGNÓSTICO TEMPORÁRIO.
+   *
+   * Não imprime a Public Key.
+   *
+   * Apenas informa:
+   * - se existe;
+   * - comprimento;
+   * - se ainda contém whitespace;
+   * - se começa com TEST-.
+   */
+  useEffect(() => {
+    console.log(
+      'MP Public Key diagnostics',
+      {
+        configured:
+          Boolean(publicKey),
+
+        length:
+          publicKey?.length ?? 0,
+
+        containsWhitespace:
+          publicKey
+            ? /\s/.test(publicKey)
+            : null,
+
+        startsWithTEST:
+          publicKey?.startsWith(
+            'TEST-'
+          ) ?? false,
+      }
+    );
+  }, [publicKey]);
+
+  /*
+   * Inicialização do CardForm.
+   */
   useEffect(() => {
     if (
       !sdkReady ||
@@ -257,7 +305,8 @@ export default function PaymentPage() {
       return;
     }
 
-    initializedRef.current = true;
+    initializedRef.current =
+      true;
 
     try {
       const mp =
@@ -279,6 +328,7 @@ export default function PaymentPage() {
             cardNumber: {
               id:
                 'form-checkout__cardNumber',
+
               placeholder:
                 'Número do cartão',
             },
@@ -286,6 +336,7 @@ export default function PaymentPage() {
             expirationDate: {
               id:
                 'form-checkout__expirationDate',
+
               placeholder:
                 'MM/AA',
             },
@@ -293,6 +344,7 @@ export default function PaymentPage() {
             securityCode: {
               id:
                 'form-checkout__securityCode',
+
               placeholder:
                 'CVV',
             },
@@ -300,6 +352,7 @@ export default function PaymentPage() {
             cardholderName: {
               id:
                 'form-checkout__cardholderName',
+
               placeholder:
                 'Nome impresso no cartão',
             },
@@ -307,6 +360,7 @@ export default function PaymentPage() {
             issuer: {
               id:
                 'form-checkout__issuer',
+
               placeholder:
                 'Banco emissor',
             },
@@ -314,6 +368,7 @@ export default function PaymentPage() {
             installments: {
               id:
                 'form-checkout__installments',
+
               placeholder:
                 'Parcelas',
             },
@@ -321,6 +376,7 @@ export default function PaymentPage() {
             identificationType: {
               id:
                 'form-checkout__identificationType',
+
               placeholder:
                 'Tipo de documento',
             },
@@ -328,6 +384,7 @@ export default function PaymentPage() {
             identificationNumber: {
               id:
                 'form-checkout__identificationNumber',
+
               placeholder:
                 'CPF',
             },
@@ -335,6 +392,7 @@ export default function PaymentPage() {
             cardholderEmail: {
               id:
                 'form-checkout__cardholderEmail',
+
               placeholder:
                 'E-mail',
             },
@@ -356,6 +414,10 @@ export default function PaymentPage() {
 
                 return;
               }
+
+              console.log(
+                'Mercado Pago CardForm carregado com sucesso.'
+              );
 
               setFormReady(true);
             },
@@ -407,6 +469,7 @@ export default function PaymentPage() {
                       auth: {
                         persistSession:
                           true,
+
                         autoRefreshToken:
                           true,
                       },
@@ -453,8 +516,10 @@ export default function PaymentPage() {
                       body:
                         JSON.stringify({
                           planId,
+
                           billingCycle:
                             'monthly',
+
                           cardTokenId,
                         }),
                     }
@@ -509,7 +574,9 @@ export default function PaymentPage() {
                   );
                 }
 
-                router.replace('/app');
+                router.replace(
+                  '/app'
+                );
               } catch (
                 submitError
               ) {
@@ -553,7 +620,8 @@ export default function PaymentPage() {
         // Nada a fazer.
       }
 
-      cardFormRef.current = null;
+      cardFormRef.current =
+        null;
 
       initializedRef.current =
         false;
@@ -575,14 +643,22 @@ export default function PaymentPage() {
       <Script
         src="https://sdk.mercadopago.com/js/v2"
         strategy="afterInteractive"
-        onLoad={() =>
-          setSdkReady(true)
-        }
-        onError={() =>
+        onLoad={() => {
+          console.log(
+            'MercadoPago.js carregado.'
+          );
+
+          setSdkReady(true);
+        }}
+        onError={() => {
+          console.error(
+            'Falha ao carregar MercadoPago.js.'
+          );
+
           setError(
             'Não foi possível carregar a conexão segura com o Mercado Pago.'
-          )
-        }
+          );
+        }}
       />
 
       <main className="min-h-screen bg-[#07111f] text-white">
@@ -600,11 +676,13 @@ export default function PaymentPage() {
               <ArrowLeft
                 size={18}
               />
+
               Voltar
             </button>
 
             <div className="text-xl font-semibold tracking-tight">
               Mirra
+
               <span className="text-cyan-400">
                 CRM
               </span>
@@ -618,6 +696,7 @@ export default function PaymentPage() {
                   <ShieldCheck
                     size={16}
                   />
+
                   Checkout seguro
                 </div>
 
@@ -673,6 +752,7 @@ export default function PaymentPage() {
                         size={17}
                         className="text-cyan-400"
                       />
+
                       13 dias de teste
                       grátis
                     </div>
@@ -683,6 +763,7 @@ export default function PaymentPage() {
                           size={17}
                           className="text-cyan-400"
                         />
+
                         Cobrança mensal
                         automática após o
                         período de teste
@@ -694,6 +775,7 @@ export default function PaymentPage() {
                         size={17}
                         className="text-cyan-400"
                       />
+
                       Cancele quando
                       precisar
                     </div>
@@ -781,6 +863,7 @@ export default function PaymentPage() {
                             size={17}
                             className="animate-spin"
                           />
+
                           Carregando ambiente
                           seguro de
                           pagamento...
@@ -917,6 +1000,7 @@ export default function PaymentPage() {
                               size={18}
                               className="animate-spin"
                             />
+
                             Configurando
                             assinatura...
                           </>
@@ -925,6 +1009,7 @@ export default function PaymentPage() {
                             <Lock
                               size={17}
                             />
+
                             Iniciar 13 dias
                             grátis
                           </>
@@ -936,6 +1021,7 @@ export default function PaymentPage() {
                       <ShieldCheck
                         size={15}
                       />
+
                       Pagamento processado
                       com segurança pelo
                       Mercado Pago
