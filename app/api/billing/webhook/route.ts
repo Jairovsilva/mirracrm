@@ -3,7 +3,9 @@ import {
   NextResponse,
 } from 'next/server';
 
-import { createClient } from '@supabase/supabase-js';
+import {
+  createClient,
+} from '@supabase/supabase-js';
 
 import {
   validateMercadoPagoWebhookSignature,
@@ -17,12 +19,20 @@ import {
   reconcileMercadoPagoPayment,
 } from '@/src/lib/mercadopago/reconcile-payment';
 
+import {
+  getMercadoPagoAuthorizedPayment,
+  mercadoPagoAmountToCents,
+} from '@/src/lib/mercadopago/authorized-payment-client';
+
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 const noStore = {
   'Cache-Control': 'no-store',
 };
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function getAdminSupabase() {
   const url =
@@ -49,17 +59,151 @@ function getAdminSupabase() {
   );
 }
 
+function getPaymentId(
+  payment: any
+) {
+  const value =
+    String(
+      payment?.id ?? ''
+    ).trim();
+
+  if (
+    !value ||
+    !/^\d+$/.test(value)
+  ) {
+    throw new Error(
+      'Pagamento Mercado Pago sem ID válido.'
+    );
+  }
+
+  return value;
+}
+
+function getPaymentAmountCents(
+  payment: any
+) {
+  const amount =
+    Number(
+      payment?.transaction_amount
+    );
+
+  if (
+    !Number.isFinite(amount) ||
+    amount <= 0
+  ) {
+    throw new Error(
+      'Pagamento Mercado Pago com valor inválido.'
+    );
+  }
+
+  const cents =
+    Math.round(
+      amount * 100
+    );
+
+  if (
+    !Number.isSafeInteger(cents) ||
+    cents <= 0
+  ) {
+    throw new Error(
+      'Pagamento Mercado Pago com valor inválido.'
+    );
+  }
+
+  return cents;
+}
+
+function getPaidAt(
+  payment: any
+) {
+  const value =
+    payment?.date_approved;
+
+  if (!value) {
+    throw new Error(
+      'Pagamento aprovado sem date_approved.'
+    );
+  }
+
+  const date =
+    new Date(value);
+
+  if (
+    Number.isNaN(
+      date.getTime()
+    )
+  ) {
+    throw new Error(
+      'date_approved inválido.'
+    );
+  }
+
+  return date.toISOString();
+}
+
+function getPaymentMethod(
+  payment: any
+) {
+  const value =
+    String(
+      payment?.payment_method_id ||
+      payment?.payment_type_id ||
+      'unknown'
+    ).trim();
+
+  return value || 'unknown';
+}
+
+async function finishWebhookEvent({
+  admin,
+  eventId,
+  attemptToken,
+  success,
+  error,
+}: {
+  admin: ReturnType<
+    typeof getAdminSupabase
+  >;
+  eventId: string;
+  attemptToken: string;
+  success: boolean;
+  error: string | null;
+}) {
+  const {
+    error: finishError,
+  } = await admin.rpc(
+    'finish_billing_webhook_event_v2',
+    {
+      p_event_id:
+        eventId,
+
+      p_attempt_token:
+        attemptToken,
+
+      p_success:
+        success,
+
+      p_error:
+        error,
+    }
+  );
+
+  if (finishError) {
+    throw new Error(
+      `Falha ao finalizar webhook: ${finishError.message}`
+    );
+  }
+}
+
 export async function POST(
   request: NextRequest
 ) {
   /*
-   * TRAVA PRINCIPAL.
-   *
-   * Mesmo que as credenciais do Mercado Pago
-   * sejam configuradas, o webhook financeiro
-   * só funciona quando esta variável estiver
-   * explicitamente definida como "true".
+   * =====================================================
+   * TRAVA 1
+   * =====================================================
    */
+
   if (
     process.env.MERCADO_PAGO_WEBHOOK_ENABLED !==
     'true'
@@ -94,24 +238,26 @@ export async function POST(
 
   try {
     /*
-     * 1. DADOS UTILIZADOS NA VALIDAÇÃO
-     *    DA ASSINATURA DO MERCADO PAGO.
+     * ===================================================
+     * 1. VALIDAR ASSINATURA DO WEBHOOK
+     * ===================================================
      */
+
     const signatureHeader =
-      request.headers.get('x-signature');
+      request.headers.get(
+        'x-signature'
+      );
 
     const requestId =
-      request.headers.get('x-request-id');
+      request.headers.get(
+        'x-request-id'
+      );
 
     const dataId =
       request.nextUrl.searchParams.get(
         'data.id'
       );
 
-    /*
-     * 2. VALIDAR A AUTENTICIDADE
-     *    DA NOTIFICAÇÃO.
-     */
     const validSignature =
       validateMercadoPagoWebhookSignature({
         signatureHeader,
@@ -123,7 +269,8 @@ export async function POST(
     if (!validSignature) {
       return NextResponse.json(
         {
-          error: 'Assinatura inválida.',
+          error:
+            'Assinatura inválida.',
         },
         {
           status: 401,
@@ -136,7 +283,7 @@ export async function POST(
       return NextResponse.json(
         {
           error:
-            'Pagamento não identificado.',
+            'Recurso não identificado.',
         },
         {
           status: 400,
@@ -146,16 +293,21 @@ export async function POST(
     }
 
     /*
-     * 3. LER O PAYLOAD.
+     * ===================================================
+     * 2. LER PAYLOAD
+     * ===================================================
      */
+
     let body: any;
 
     try {
-      body = await request.json();
+      body =
+        await request.json();
     } catch {
       return NextResponse.json(
         {
-          error: 'Payload inválido.',
+          error:
+            'Payload inválido.',
         },
         {
           status: 400,
@@ -164,14 +316,25 @@ export async function POST(
       );
     }
 
+    const eventType =
+      String(
+        body?.type || ''
+      ).trim();
+
     /*
-     * 4. ESTE PIPELINE PROCESSA
-     *    SOMENTE EVENTOS DE PAYMENT.
+     * Processamos apenas:
+     *
+     * payment
+     *
+     * e
+     *
+     * subscription_authorized_payment
      */
+
     if (
-      body?.type !== 'payment' ||
-      String(body?.data?.id || '') !==
-        dataId
+      eventType !== 'payment' &&
+      eventType !==
+        'subscription_authorized_payment'
     ) {
       return NextResponse.json(
         {
@@ -187,12 +350,33 @@ export async function POST(
       );
     }
 
+    if (
+      String(
+        body?.data?.id || ''
+      ) !== dataId
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Identificador do payload diverge da URL.',
+        },
+        {
+          status: 400,
+          headers: noStore,
+        }
+      );
+    }
+
     /*
-     * 5. IDENTIFICADOR ÚNICO
-     *    DA NOTIFICAÇÃO.
+     * ===================================================
+     * 3. IDENTIFICAR EVENTO
+     * ===================================================
      */
+
     const providerEventId =
-      String(body?.id || '').trim();
+      String(
+        body?.id || ''
+      ).trim();
 
     if (!providerEventId) {
       return NextResponse.json(
@@ -207,15 +391,15 @@ export async function POST(
       );
     }
 
-    const admin = getAdminSupabase();
+    const admin =
+      getAdminSupabase();
 
     /*
-     * 6. RESERVAR O EVENTO.
-     *
-     * A função SQL controla duplicidade,
-     * concorrência e cria um token exclusivo
-     * para esta tentativa.
+     * ===================================================
+     * 4. CLAIM / IDEMPOTÊNCIA DO WEBHOOK
+     * ===================================================
      */
+
     const {
       data: claimRows,
       error: claimError,
@@ -226,7 +410,7 @@ export async function POST(
           providerEventId,
 
         p_event_type:
-          String(body.type),
+          eventType,
 
         p_resource_id:
           dataId,
@@ -240,7 +424,9 @@ export async function POST(
     }
 
     const claim =
-      Array.isArray(claimRows)
+      Array.isArray(
+        claimRows
+      )
         ? claimRows[0]
         : claimRows;
 
@@ -250,11 +436,6 @@ export async function POST(
       );
     }
 
-    /*
-     * Evento já registrado anteriormente.
-     *
-     * Não repetimos o processamento.
-     */
     if (!claim.should_process) {
       return NextResponse.json(
         {
@@ -269,14 +450,19 @@ export async function POST(
     }
 
     const eventId =
-      String(claim.event_id);
+      String(
+        claim.event_id || ''
+      );
 
     const attemptToken =
       String(
         claim.attempt_token || ''
       );
 
-    if (!eventId || !attemptToken) {
+    if (
+      !eventId ||
+      !attemptToken
+    ) {
       throw new Error(
         'Reserva sem token de processamento.'
       );
@@ -284,133 +470,450 @@ export async function POST(
 
     try {
       /*
-       * 7. CONSULTA CANÔNICA DO PAGAMENTO.
+       * =================================================
+       * FLUXO A
        *
-       * Não confiamos no status informado
-       * diretamente pelo webhook.
+       * PAYMENT TRADICIONAL
+       * =================================================
        */
-      const payment =
-        await getMercadoPagoPayment(
-          dataId
-        );
-
-      /*
-       * 8. O external_reference DO
-       *    MERCADO PAGO DEVE CONTER
-       *    billing_orders.id.
-       */
-      const orderId =
-        payment.external_reference;
 
       if (
-        !orderId ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-          orderId
-        )
+        eventType === 'payment'
       ) {
-        throw new Error(
-          'Pagamento sem referência válida ao pedido.'
+        const payment =
+          await getMercadoPagoPayment(
+            dataId
+          );
+
+        const orderId =
+          payment.external_reference;
+
+        /*
+         * IMPORTANTE:
+         *
+         * Este fluxo continua sendo o fluxo
+         * tradicional baseado em billing_order.
+         *
+         * As faturas de assinatura recorrente
+         * são processadas pelo FLUXO B abaixo.
+         */
+
+        if (
+          !orderId ||
+          !UUID_REGEX.test(
+            orderId
+          )
+        ) {
+          throw new Error(
+            'Pagamento sem referência válida ao pedido.'
+          );
+        }
+
+        const {
+          data: order,
+          error: orderError,
+        } = await admin
+          .from(
+            'billing_orders'
+          )
+          .select(
+            `
+              id,
+              billing_account_id,
+              plan_id,
+              billing_cycle,
+              amount_cents,
+              currency,
+              status,
+              provider,
+              order_type
+            `
+          )
+          .eq(
+            'id',
+            orderId
+          )
+          .maybeSingle();
+
+        if (orderError) {
+          throw new Error(
+            `Falha ao consultar pedido: ${orderError.message}`
+          );
+        }
+
+        if (!order) {
+          throw new Error(
+            'Pedido correspondente não encontrado.'
+          );
+        }
+
+        const reconciled =
+          reconcileMercadoPagoPayment(
+            payment,
+            order
+          );
+
+        /*
+         * TRAVA 2
+         */
+
+        if (
+          process.env
+            .MERCADO_PAGO_APPLY_PAYMENTS !==
+          'true'
+        ) {
+          await finishWebhookEvent({
+            admin,
+            eventId,
+            attemptToken,
+            success: false,
+            error:
+              'Pagamento validado, mas aplicação financeira permanece desabilitada.',
+          });
+
+          return NextResponse.json(
+            {
+              received: true,
+              verified: true,
+              eventType:
+                'payment',
+              applied: false,
+            },
+            {
+              status: 503,
+              headers: noStore,
+            }
+          );
+        }
+
+        const {
+          error: applyError,
+        } = await admin.rpc(
+          'apply_verified_mercado_pago_payment',
+          {
+            p_order_id:
+              reconciled.orderId,
+
+            p_provider_payment_id:
+              reconciled.providerPaymentId,
+
+            p_amount_cents:
+              reconciled.amountCents,
+
+            p_currency:
+              reconciled.currency,
+
+            p_payment_method:
+              reconciled.paymentMethod,
+
+            p_paid_at:
+              reconciled.paidAt,
+          }
+        );
+
+        if (applyError) {
+          throw new Error(
+            `Falha na aplicação financeira: ${applyError.message}`
+          );
+        }
+
+        await finishWebhookEvent({
+          admin,
+          eventId,
+          attemptToken,
+          success: true,
+          error: null,
+        });
+
+        return NextResponse.json(
+          {
+            received: true,
+            verified: true,
+            eventType:
+              'payment',
+            applied: true,
+          },
+          {
+            status: 200,
+            headers: noStore,
+          }
         );
       }
 
       /*
-       * 9. CARREGAR O PEDIDO REAL
-       *    DO MIRRACRM.
+       * =================================================
+       * FLUXO B
+       *
+       * SUBSCRIPTION_AUTHORIZED_PAYMENT
+       * =================================================
+       *
+       * Aqui data.id NÃO é payment.id.
+       *
+       * É o ID da fatura/authorized payment.
        */
+
+      const invoice =
+        await getMercadoPagoAuthorizedPayment(
+          dataId
+        );
+
+      const providerInvoiceId =
+        String(
+          invoice.id
+        );
+
+      const providerSubscriptionId =
+        String(
+          invoice.preapproval_id ||
+          ''
+        ).trim();
+
+      if (
+        !providerSubscriptionId
+      ) {
+        throw new Error(
+          'Fatura sem preapproval_id.'
+        );
+      }
+
+      /*
+       * A fatura informa qual payment.id
+       * foi gerado.
+       *
+       * Mesmo assim NÃO confiamos nos dados
+       * financeiros embutidos nela.
+       *
+       * Consultamos /v1/payments/{id}.
+       */
+
+      const providerPaymentId =
+        String(
+          invoice.payment?.id ??
+          ''
+        ).trim();
+
+      if (
+        !providerPaymentId ||
+        !/^\d+$/.test(
+          providerPaymentId
+        )
+      ) {
+        throw new Error(
+          'Fatura sem payment.id válido.'
+        );
+      }
+
+      const payment =
+        await getMercadoPagoPayment(
+          providerPaymentId
+        );
+
+      /*
+       * =================================================
+       * VALIDAR PAGAMENTO CANÔNICO
+       * =================================================
+       */
+
+      const canonicalPaymentId =
+        getPaymentId(
+          payment
+        );
+
+      if (
+        canonicalPaymentId !==
+        providerPaymentId
+      ) {
+        throw new Error(
+          'Pagamento canônico diverge da fatura.'
+        );
+      }
+
+      if (
+        payment.status !==
+        'approved'
+      ) {
+        /*
+         * Ainda NÃO transformamos rejeição em
+         * past_due aqui.
+         *
+         * Isso será tratado em fluxo separado,
+         * evitando bloquear cliente por uma
+         * notificação intermediária.
+         */
+
+        await finishWebhookEvent({
+          admin,
+          eventId,
+          attemptToken,
+          success: true,
+          error: null,
+        });
+
+        return NextResponse.json(
+          {
+            received: true,
+            verified: true,
+            eventType:
+              'subscription_authorized_payment',
+            paymentStatus:
+              payment.status ||
+              'unknown',
+            applied: false,
+          },
+          {
+            status: 200,
+            headers: noStore,
+          }
+        );
+      }
+
+      const currency =
+        String(
+          payment.currency_id ||
+          ''
+        ).trim();
+
+      if (
+        currency !== 'BRL'
+      ) {
+        throw new Error(
+          'Pagamento recorrente com moeda inválida.'
+        );
+      }
+
+      /*
+       * Comparação independente:
+       *
+       * authorized_payment.transaction_amount
+       *
+       * versus
+       *
+       * payment.transaction_amount
+       */
+
+      const invoiceAmountCents =
+        mercadoPagoAmountToCents(
+          invoice.transaction_amount
+        );
+
+      const paymentAmountCents =
+        getPaymentAmountCents(
+          payment
+        );
+
+      if (
+        invoiceAmountCents !==
+        paymentAmountCents
+      ) {
+        throw new Error(
+          'Valor da fatura diverge do pagamento canônico.'
+        );
+      }
+
+      if (
+        String(
+          invoice.currency_id
+        ).trim() !==
+        currency
+      ) {
+        throw new Error(
+          'Moeda da fatura diverge do pagamento canônico.'
+        );
+      }
+
+      /*
+       * Confirma que o preapproval realmente
+       * pertence a uma assinatura MirraCRM.
+       *
+       * Não dependemos de external_reference.
+       */
+
       const {
-        data: order,
-        error: orderError,
+        data: subscription,
+        error: subscriptionError,
       } = await admin
-        .from('billing_orders')
+        .from(
+          'billing_subscriptions'
+        )
         .select(
           `
             id,
             billing_account_id,
             plan_id,
             billing_cycle,
-            amount_cents,
-            currency,
             status,
             provider,
-            order_type
+            provider_subscription_id
           `
         )
-        .eq('id', orderId)
+        .eq(
+          'provider',
+          'mercado_pago'
+        )
+        .eq(
+          'provider_subscription_id',
+          providerSubscriptionId
+        )
         .maybeSingle();
 
-      if (orderError) {
-        throw new Error(
-          `Falha ao consultar pedido: ${orderError.message}`
-        );
-      }
-
-      if (!order) {
-        throw new Error(
-          'Pedido correspondente não encontrado.'
-        );
-      }
-
-      /*
-       * 10. CONCILIAR PAGAMENTO X PEDIDO.
-       *
-       * A função confere:
-       *
-       * - status approved;
-       * - moeda BRL;
-       * - external_reference;
-       * - valor exato;
-       * - pedido pending/processing;
-       * - provedor Mercado Pago.
-       */
-      const reconciled =
-        reconcileMercadoPagoPayment(
-          payment,
-          order
-        );
-
-      /*
-       * =================================================
-       * SEGUNDA TRAVA DE SEGURANÇA
-       * =================================================
-       *
-       * Mesmo com o webhook habilitado,
-       * nenhuma assinatura será ativada enquanto
-       * MERCADO_PAGO_APPLY_PAYMENTS não for "true".
-       */
       if (
-        process.env.MERCADO_PAGO_APPLY_PAYMENTS !==
+        subscriptionError
+      ) {
+        throw new Error(
+          `Falha ao localizar assinatura: ${subscriptionError.message}`
+        );
+      }
+
+      if (!subscription) {
+        throw new Error(
+          'Assinatura Mercado Pago não pertence ao MirraCRM.'
+        );
+      }
+
+      /*
+       * =================================================
+       * TRAVA 2
+       * =================================================
+       *
+       * Neste momento já sabemos:
+       *
+       * - webhook autêntico;
+       * - invoice consultada no MP;
+       * - preapproval conhecido;
+       * - payment consultado no MP;
+       * - payment approved;
+       * - BRL;
+       * - invoice/payment com mesmo valor;
+       * - invoice/payment com mesma moeda.
+       *
+       * Mas ainda NÃO aplicamos dinheiro
+       * enquanto o gate estiver false.
+       */
+
+      if (
+        process.env
+          .MERCADO_PAGO_APPLY_PAYMENTS !==
         'true'
       ) {
-        const {
-          error: disabledFinishError,
-        } = await admin.rpc(
-          'finish_billing_webhook_event_v2',
-          {
-            p_event_id:
-              eventId,
-
-            p_attempt_token:
-              attemptToken,
-
-            p_success:
-              false,
-
-            p_error:
-              'Pagamento validado, mas aplicação financeira permanece desabilitada.',
-          }
-        );
-
-        if (disabledFinishError) {
-          console.error(
-            'Falha ao registrar webhook desabilitado:',
-            disabledFinishError
-          );
-        }
+        await finishWebhookEvent({
+          admin,
+          eventId,
+          attemptToken,
+          success: false,
+          error:
+            'Fatura recorrente validada, mas aplicação financeira permanece desabilitada.',
+        });
 
         return NextResponse.json(
           {
             received: true,
             verified: true,
+            eventType:
+              'subscription_authorized_payment',
+            subscriptionMatched:
+              true,
+            paymentApproved:
+              true,
             applied: false,
           },
           {
@@ -421,100 +924,78 @@ export async function POST(
       }
 
       /*
-       * 11. APLICAÇÃO FINANCEIRA ATÔMICA.
+       * =================================================
+       * APLICAÇÃO ATÔMICA
+       * =================================================
        *
-       * Chegamos aqui somente depois de:
+       * Este é o RPC que acabamos de testar:
        *
-       * - assinatura válida;
-       * - consulta direta ao Mercado Pago;
-       * - pagamento approved;
-       * - pedido encontrado;
-       * - external_reference correspondente;
-       * - valor correspondente;
-       * - moeda BRL;
-       * - trava financeira habilitada.
-       *
-       * O RPC registra o pagamento e aplica
-       * primeira contratação OU renovação
-       * dentro da transação PostgreSQL.
+       * - identifica primeira cobrança;
+       * - ou cria renewal order;
+       * - aplica payment;
+       * - vincula authorized_payment.id;
+       * - protege por payment.id;
+       * - protege por invoice.id.
        */
+
       const {
-        error: applyError,
+        error: recurringApplyError,
       } = await admin.rpc(
-        'apply_verified_mercado_pago_payment',
+        'apply_verified_mercado_pago_subscription_invoice',
         {
-          p_order_id:
-            reconciled.orderId,
+          p_provider_subscription_id:
+            providerSubscriptionId,
+
+          p_provider_invoice_id:
+            providerInvoiceId,
 
           p_provider_payment_id:
-            reconciled.providerPaymentId,
+            canonicalPaymentId,
 
           p_amount_cents:
-            reconciled.amountCents,
+            paymentAmountCents,
 
           p_currency:
-            reconciled.currency,
+            currency,
 
           p_payment_method:
-            reconciled.paymentMethod,
+            getPaymentMethod(
+              payment
+            ),
 
           p_paid_at:
-            reconciled.paidAt,
+            getPaidAt(
+              payment
+            ),
         }
       );
 
-      if (applyError) {
+      if (
+        recurringApplyError
+      ) {
         throw new Error(
-          `Falha na aplicação financeira: ${applyError.message}`
+          `Falha ao aplicar fatura recorrente: ${recurringApplyError.message}`
         );
       }
 
-      /*
-       * 12. PAGAMENTO JÁ FOI APLICADO.
-       *
-       * Agora podemos marcar esta tentativa
-       * do webhook como concluída.
-       */
-      const {
-        error: finishError,
-      } = await admin.rpc(
-        'finish_billing_webhook_event_v2',
-        {
-          p_event_id:
-            eventId,
+      await finishWebhookEvent({
+        admin,
+        eventId,
+        attemptToken,
+        success: true,
+        error: null,
+      });
 
-          p_attempt_token:
-            attemptToken,
-
-          p_success:
-            true,
-
-          p_error:
-            null,
-        }
-      );
-
-      if (finishError) {
-        /*
-         * O pagamento NÃO deve ser revertido aqui.
-         *
-         * O RPC financeiro é idempotente.
-         * Portanto uma reconciliação posterior
-         * poderá recuperar este cenário sem
-         * duplicar o pagamento.
-         */
-        throw new Error(
-          `Pagamento aplicado, mas webhook não pôde ser finalizado: ${finishError.message}`
-        );
-      }
-
-      /*
-       * 13. PROCESSAMENTO CONCLUÍDO.
-       */
       return NextResponse.json(
         {
           received: true,
           verified: true,
+          eventType:
+            'subscription_authorized_payment',
+          subscriptionMatched:
+            true,
+          paymentApproved:
+            true,
           applied: true,
         },
         {
@@ -522,38 +1003,34 @@ export async function POST(
           headers: noStore,
         }
       );
-    } catch (processingError) {
+    } catch (
+      processingError
+    ) {
       const message =
         processingError instanceof Error
           ? processingError.message
           : 'Erro desconhecido no processamento.';
 
       /*
-       * Marca a tentativa como falha.
+       * Tentamos registrar a falha.
        *
-       * O token impede uma tentativa antiga
-       * de finalizar uma tentativa mais nova.
+       * Se isso falhar, apenas registramos no
+       * log porque o erro original continua
+       * sendo a informação mais importante.
        */
-      const {
-        error: finishError,
-      } = await admin.rpc(
-        'finish_billing_webhook_event_v2',
-        {
-          p_event_id:
-            eventId,
 
-          p_attempt_token:
-            attemptToken,
-
-          p_success:
-            false,
-
-          p_error:
+      try {
+        await finishWebhookEvent({
+          admin,
+          eventId,
+          attemptToken,
+          success: false,
+          error:
             message,
-        }
-      );
-
-      if (finishError) {
+        });
+      } catch (
+        finishError
+      ) {
         console.error(
           'Falha ao registrar erro do webhook:',
           finishError
@@ -618,6 +1095,14 @@ export async function GET() {
         applyPayments
           ? 'enabled'
           : 'disabled',
+
+      supportedEvents: [
+        'payment',
+        'subscription_authorized_payment',
+      ],
+
+      recurringInvoices:
+        'supported',
     },
     {
       status: 200,
