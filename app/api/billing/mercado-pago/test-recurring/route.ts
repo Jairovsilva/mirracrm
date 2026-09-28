@@ -1,132 +1,282 @@
-import { NextRequest, NextResponse } from 'next/server';
+import {
+  NextRequest,
+  NextResponse,
+} from 'next/server';
 
-export const dynamic = 'force-dynamic';
-export const runtime = 'nodejs';
+export const dynamic =
+  'force-dynamic';
+
+export const runtime =
+  'nodejs';
 
 const noStore = {
   'Cache-Control': 'no-store',
 };
 
-export async function POST(request: NextRequest) {
-  if (process.env.VERCEL_ENV === 'production') {
+type MercadoPagoErrorResponse = {
+  message?: string;
+  error?: string;
+  status?: number;
+  cause?: unknown;
+};
+
+type MercadoPagoSubscriptionResponse = {
+  id?: string;
+  status?: string;
+  next_payment_date?: string;
+  external_reference?: string;
+};
+
+export async function POST(
+  request: NextRequest
+) {
+  /*
+   * Esta rota existe exclusivamente
+   * para testes no ambiente Preview.
+   *
+   * Nunca deve funcionar em produção.
+   */
+  if (
+    process.env.VERCEL_ENV ===
+    'production'
+  ) {
     return NextResponse.json(
-      { ok: false, error: 'Not found.' },
-      { status: 404, headers: noStore }
+      {
+        ok: false,
+        error: 'Not found.',
+      },
+      {
+        status: 404,
+        headers: noStore,
+      }
     );
   }
 
   const accessToken =
-    process.env.MERCADO_PAGO_ACCESS_TOKEN?.trim();
+    process.env
+      .MERCADO_PAGO_ACCESS_TOKEN
+      ?.trim();
 
   if (!accessToken) {
     return NextResponse.json(
-      { ok: false, error: 'Mercado Pago não configurado.' },
-      { status: 503, headers: noStore }
+      {
+        ok: false,
+        error:
+          'Mercado Pago não configurado.',
+      },
+      {
+        status: 503,
+        headers: noStore,
+      }
     );
   }
 
   try {
-    const body = await request.json();
+    const body =
+      (await request.json()) as {
+        cardTokenId?: string;
+        payerEmail?: string;
+      };
 
     const cardTokenId =
-      String(body?.cardTokenId || '').trim();
+      String(
+        body?.cardTokenId || ''
+      ).trim();
 
     const payerEmail =
-      String(body?.payerEmail || '').trim();
+      String(
+        body?.payerEmail || ''
+      )
+        .trim()
+        .toLowerCase();
 
-    if (!cardTokenId || !payerEmail) {
+    if (
+      !cardTokenId ||
+      !payerEmail
+    ) {
       return NextResponse.json(
         {
           ok: false,
-          error: 'Token do cartão ou e-mail ausente.',
+          error:
+            'Token do cartão ou e-mail ausente.',
         },
-        { status: 400, headers: noStore }
+        {
+          status: 400,
+          headers: noStore,
+        }
       );
     }
 
     /*
-     * Assinatura DESCARTÁVEL, exclusivamente para
-     * validar o ciclo real de cobrança recorrente.
+     * Assinatura descartável utilizada
+     * exclusivamente para validar o
+     * ciclo real de cobrança recorrente
+     * do Mercado Pago.
      *
-     * Não possui free_trial.
+     * IMPORTANTE:
+     * - não possui free_trial;
+     * - não utiliza o plano Basic real;
+     * - não utiliza o plano Pro real;
+     * - valor de teste: R$ 10,00;
+     * - não altera a assinatura normal
+     *   já criada no MirraCRM.
      */
+
+    const now =
+      Date.now();
+
+    /*
+     * Início alguns minutos à frente
+     * para evitar problemas de relógio
+     * entre Vercel e Mercado Pago.
+     */
+    const startDate =
+      new Date(
+        now +
+          5 * 60 * 1000
+      ).toISOString();
+
+    /*
+     * Assinatura de teste válida por
+     * aproximadamente 1 ano.
+     */
+    const endDate =
+      new Date(
+        now +
+          365 *
+            24 *
+            60 *
+            60 *
+            1000
+      ).toISOString();
+
     const externalReference =
       `MIRRACRM_RECURRING_TEST_${Date.now()}`;
 
-    const response = await fetch(
-      'https://api.mercadopago.com/preapproval',
-      {
-        method: 'POST',
+    const idempotencyKey =
+      crypto.randomUUID();
 
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'X-Idempotency-Key': crypto.randomUUID(),
-        },
+    const mercadoPagoResponse =
+      await fetch(
+        'https://api.mercadopago.com/preapproval',
+        {
+          method: 'POST',
 
-        cache: 'no-store',
+          headers: {
+            Authorization:
+              `Bearer ${accessToken}`,
 
-        body: JSON.stringify({
-          reason:
-            'MirraCRM - Teste técnico recorrência',
+            'Content-Type':
+              'application/json',
 
-          external_reference:
-            externalReference,
-
-          payer_email:
-            payerEmail,
-
-          card_token_id:
-            cardTokenId,
-
-          auto_recurring: {
-            frequency: 1,
-            frequency_type: 'months',
-
-            /*
-             * Valor pequeno porque esta assinatura
-             * existe apenas no ambiente Test User.
-             */
-            transaction_amount: 10,
-            currency_id: 'BRL',
+            'X-Idempotency-Key':
+              idempotencyKey,
           },
 
-          back_url:
-            'https://develop-mirracrm.vercel.app/cadastro/pagamento/teste-recorrencia',
+          cache: 'no-store',
 
-          status: 'authorized',
-        }),
-      }
-    );
+          body: JSON.stringify({
+            reason:
+              'MirraCRM - Teste tecnico recorrencia',
 
-    const text =
-      await response.text();
+            external_reference:
+              externalReference,
 
-    let result: any = null;
+            payer_email:
+              payerEmail,
+
+            card_token_id:
+              cardTokenId,
+
+            auto_recurring: {
+              frequency: 1,
+
+              frequency_type:
+                'months',
+
+              start_date:
+                startDate,
+
+              end_date:
+                endDate,
+
+              transaction_amount:
+                10,
+
+              currency_id:
+                'BRL',
+            },
+
+            back_url:
+              'https://develop-mirracrm.vercel.app/cadastro/pagamento/teste-recorrencia',
+
+            status:
+              'authorized',
+          }),
+        }
+      );
+
+    const responseText =
+      await mercadoPagoResponse.text();
+
+    let mercadoPagoResult:
+      | MercadoPagoSubscriptionResponse
+      | MercadoPagoErrorResponse
+      | null = null;
 
     try {
-      result = text
-        ? JSON.parse(text)
-        : null;
+      mercadoPagoResult =
+        responseText
+          ? JSON.parse(
+              responseText
+            )
+          : null;
     } catch {
-      result = null;
+      mercadoPagoResult =
+        null;
     }
 
-    if (!response.ok) {
+    /*
+     * Nunca registramos:
+     * - Access Token
+     * - cardTokenId
+     * - Authorization header
+     *
+     * Apenas a resposta de erro
+     * fornecida pelo Mercado Pago.
+     */
+    if (
+      !mercadoPagoResponse.ok
+    ) {
       console.error(
         'Mercado Pago recurring test:',
-        response.status,
-        result
+        mercadoPagoResponse.status,
+        mercadoPagoResult
       );
+
+      const providerError =
+        mercadoPagoResult as
+          | MercadoPagoErrorResponse
+          | null;
 
       return NextResponse.json(
         {
           ok: false,
+
           error:
             'Mercado Pago recusou a criação da assinatura de teste.',
-          status: response.status,
-          provider:
-            result ?? null,
+
+          providerStatus:
+            mercadoPagoResponse.status,
+
+          providerMessage:
+            providerError?.message ??
+            providerError?.error ??
+            null,
+
+          providerCause:
+            providerError?.cause ??
+            null,
         },
         {
           status: 502,
@@ -135,15 +285,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const subscription =
+      mercadoPagoResult as
+        | MercadoPagoSubscriptionResponse
+        | null;
+
     const subscriptionId =
-      String(result?.id || '').trim();
+      String(
+        subscription?.id || ''
+      ).trim();
 
     if (!subscriptionId) {
+      console.error(
+        'Mercado Pago recurring test: resposta sem subscription ID.',
+        mercadoPagoResult
+      );
+
       return NextResponse.json(
         {
           ok: false,
+
           error:
-            'Mercado Pago criou resposta sem ID de assinatura.',
+            'Mercado Pago respondeu sem ID da assinatura.',
         },
         {
           status: 502,
@@ -152,15 +315,41 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    /*
+     * Não devolvemos nenhum dado
+     * sensível para o navegador.
+     *
+     * subscriptionId e
+     * externalReference são
+     * identificadores, não credenciais.
+     */
     return NextResponse.json(
       {
         ok: true,
+
         subscriptionId,
+
         status:
-          result?.status ?? null,
+          subscription?.status ??
+          null,
+
         nextPaymentDate:
-          result?.next_payment_date ?? null,
+          subscription
+            ?.next_payment_date ??
+          null,
+
         externalReference,
+
+        test: {
+          amount: 10,
+          currency: 'BRL',
+          frequency: 1,
+          frequencyType:
+            'months',
+          startDate,
+          endDate,
+          freeTrial: false,
+        },
       },
       {
         status: 200,
@@ -169,13 +358,14 @@ export async function POST(request: NextRequest) {
     );
   } catch (error) {
     console.error(
-      'Recurring test error:',
+      'Recurring test unexpected error:',
       error
     );
 
     return NextResponse.json(
       {
         ok: false,
+
         error:
           error instanceof Error
             ? error.message
