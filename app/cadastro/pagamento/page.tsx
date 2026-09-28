@@ -188,6 +188,9 @@ export default function PaymentPage() {
   const initializedRef =
     useRef(false);
 
+  const submittingRef =
+    useRef(false);
+
   const [sdkReady, setSdkReady] =
     useState(false);
 
@@ -227,14 +230,6 @@ export default function PaymentPage() {
       ? '499'
       : '1497';
 
-  /*
-   * A Public Key é incorporada ao
-   * frontend pelo Next.js.
-   *
-   * trim() remove somente espaços,
-   * tabs ou quebras de linha existentes
-   * no início/final do valor.
-   */
   const publicKey =
     process.env
       .NEXT_PUBLIC_MERCADO_PAGO_PUBLIC_KEY
@@ -248,43 +243,6 @@ export default function PaymentPage() {
     process.env
       .NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  /*
-   * DIAGNÓSTICO TEMPORÁRIO.
-   *
-   * Não imprime a Public Key.
-   *
-   * Apenas informa:
-   * - se existe;
-   * - comprimento;
-   * - se ainda contém whitespace;
-   * - se começa com TEST-.
-   */
-  useEffect(() => {
-    console.log(
-      'MP Public Key diagnostics',
-      {
-        configured:
-          Boolean(publicKey),
-
-        length:
-          publicKey?.length ?? 0,
-
-        containsWhitespace:
-          publicKey
-            ? /\s/.test(publicKey)
-            : null,
-
-        startsWithTEST:
-          publicKey?.startsWith(
-            'TEST-'
-          ) ?? false,
-      }
-    );
-  }, [publicKey]);
-
-  /*
-   * Inicialização do CardForm.
-   */
   useEffect(() => {
     if (
       !sdkReady ||
@@ -415,10 +373,6 @@ export default function PaymentPage() {
                 return;
               }
 
-              console.log(
-                'Mercado Pago CardForm carregado com sucesso.'
-              );
-
               setFormReady(true);
             },
 
@@ -431,9 +385,14 @@ export default function PaymentPage() {
             ) => {
               event.preventDefault();
 
-              if (submitting) {
+              if (
+                submittingRef.current
+              ) {
                 return;
               }
+
+              submittingRef.current =
+                true;
 
               setError('');
               setSubmitting(true);
@@ -591,6 +550,9 @@ export default function PaymentPage() {
                   )
                 );
               } finally {
+                submittingRef.current =
+                  false;
+
                 setSubmitting(false);
               }
             },
@@ -629,14 +591,19 @@ export default function PaymentPage() {
   }, [
     amount,
     isAnnual,
+    planId,
     publicKey,
     router,
     sdkReady,
-    submitting,
     supabaseAnonKey,
     supabaseUrl,
-    planId,
   ]);
+
+  const whiteInputClass =
+    'h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20';
+
+  const mercadoPagoFieldClass =
+    'h-12 overflow-hidden rounded-xl border border-slate-300 bg-white px-3 py-3 text-slate-950 transition focus-within:border-cyan-500 focus-within:ring-2 focus-within:ring-cyan-500/20';
 
   return (
     <>
@@ -644,10 +611,6 @@ export default function PaymentPage() {
         src="https://sdk.mercadopago.com/js/v2"
         strategy="afterInteractive"
         onLoad={() => {
-          console.log(
-            'MercadoPago.js carregado.'
-          );
-
           setSdkReady(true);
         }}
         onError={() => {
@@ -682,7 +645,6 @@ export default function PaymentPage() {
 
             <div className="text-xl font-semibold tracking-tight">
               Mirra
-
               <span className="text-cyan-400">
                 CRM
               </span>
@@ -875,36 +837,42 @@ export default function PaymentPage() {
                       className="space-y-5"
                     >
                       <div>
-                        <label className="mb-2 block text-sm font-medium text-slate-300">
+                        <label className="mb-2 block text-sm font-medium text-slate-200">
                           Número do cartão
                         </label>
 
                         <div
                           id="form-checkout__cardNumber"
-                          className="h-12 rounded-xl border border-white/10 bg-[#0b1727] px-3 py-3"
+                          className={
+                            mercadoPagoFieldClass
+                          }
                         />
                       </div>
 
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="mb-2 block text-sm font-medium text-slate-300">
+                          <label className="mb-2 block text-sm font-medium text-slate-200">
                             Validade
                           </label>
 
                           <div
                             id="form-checkout__expirationDate"
-                            className="h-12 rounded-xl border border-white/10 bg-[#0b1727] px-3 py-3"
+                            className={
+                              mercadoPagoFieldClass
+                            }
                           />
                         </div>
 
                         <div>
-                          <label className="mb-2 block text-sm font-medium text-slate-300">
+                          <label className="mb-2 block text-sm font-medium text-slate-200">
                             CVV
                           </label>
 
                           <div
                             id="form-checkout__securityCode"
-                            className="h-12 rounded-xl border border-white/10 bg-[#0b1727] px-3 py-3"
+                            className={
+                              mercadoPagoFieldClass
+                            }
                           />
                         </div>
                       </div>
@@ -912,7 +880,7 @@ export default function PaymentPage() {
                       <div>
                         <label
                           htmlFor="form-checkout__cardholderName"
-                          className="mb-2 block text-sm font-medium text-slate-300"
+                          className="mb-2 block text-sm font-medium text-slate-200"
                         >
                           Nome no cartão
                         </label>
@@ -921,7 +889,10 @@ export default function PaymentPage() {
                           id="form-checkout__cardholderName"
                           type="text"
                           autoComplete="cc-name"
-                          className="h-12 w-full rounded-xl border border-white/10 bg-[#0b1727] px-4 text-sm text-white outline-none transition focus:border-cyan-400/60"
+                          placeholder="Nome impresso no cartão"
+                          className={
+                            whiteInputClass
+                          }
                         />
                       </div>
 
@@ -929,21 +900,21 @@ export default function PaymentPage() {
                         <div>
                           <label
                             htmlFor="form-checkout__identificationType"
-                            className="mb-2 block text-sm font-medium text-slate-300"
+                            className="mb-2 block text-sm font-medium text-slate-200"
                           >
                             Documento
                           </label>
 
                           <select
                             id="form-checkout__identificationType"
-                            className="h-12 w-full rounded-xl border border-white/10 bg-[#0b1727] px-3 text-sm text-white outline-none"
+                            className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-950 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
                           />
                         </div>
 
                         <div>
                           <label
                             htmlFor="form-checkout__identificationNumber"
-                            className="mb-2 block text-sm font-medium text-slate-300"
+                            className="mb-2 block text-sm font-medium text-slate-200"
                           >
                             CPF
                           </label>
@@ -952,7 +923,10 @@ export default function PaymentPage() {
                             id="form-checkout__identificationNumber"
                             type="text"
                             inputMode="numeric"
-                            className="h-12 w-full rounded-xl border border-white/10 bg-[#0b1727] px-4 text-sm text-white outline-none transition focus:border-cyan-400/60"
+                            placeholder="CPF"
+                            className={
+                              whiteInputClass
+                            }
                           />
                         </div>
                       </div>
@@ -960,7 +934,7 @@ export default function PaymentPage() {
                       <div>
                         <label
                           htmlFor="form-checkout__cardholderEmail"
-                          className="mb-2 block text-sm font-medium text-slate-300"
+                          className="mb-2 block text-sm font-medium text-slate-200"
                         >
                           E-mail
                         </label>
@@ -969,7 +943,10 @@ export default function PaymentPage() {
                           id="form-checkout__cardholderEmail"
                           type="email"
                           autoComplete="email"
-                          className="h-12 w-full rounded-xl border border-white/10 bg-[#0b1727] px-4 text-sm text-white outline-none transition focus:border-cyan-400/60"
+                          placeholder="E-mail"
+                          className={
+                            whiteInputClass
+                          }
                         />
                       </div>
 
