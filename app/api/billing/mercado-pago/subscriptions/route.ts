@@ -492,23 +492,14 @@ export async function POST(
   } = await admin.rpc(
     'create_or_reuse_billing_order',
     {
-      p_billing_account_id:
+      p_account_id:
         billingAccountId,
-
-      p_plan_id:
-        planId,
 
       p_billing_cycle:
         'monthly',
 
-      p_amount_cents:
-        expectedAmountCents,
-
-      p_currency:
-        'BRL',
-
-      p_provider:
-        'mercado_pago',
+      p_plan_id:
+        planId,
     }
   );
 
