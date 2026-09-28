@@ -3,24 +3,20 @@ import {
   NextResponse,
 } from 'next/server';
 
-export const dynamic = 'force-dynamic';
-export const runtime = 'nodejs';
+export const dynamic =
+  'force-dynamic';
+
+export const runtime =
+  'nodejs';
+
+const TEST_PLAN_ID =
+  '244ac3a842a94b5c8f0dee36679f33d8';
+
+const BACK_URL =
+  'https://develop-mirracrm.vercel.app/cadastro/pagamento/teste-recorrencia';
 
 const noStore = {
   'Cache-Control': 'no-store',
-};
-
-type MercadoPagoPlan = {
-  id?: string;
-  status?: string;
-  reason?: string;
-};
-
-type MercadoPagoSubscription = {
-  id?: string;
-  status?: string;
-  next_payment_date?: string;
-  external_reference?: string;
 };
 
 type MercadoPagoError = {
@@ -30,9 +26,35 @@ type MercadoPagoError = {
   cause?: unknown;
 };
 
+type MercadoPagoPlan = {
+  id?: string;
+  status?: string;
+  reason?: string;
+
+  auto_recurring?: {
+    frequency?: number;
+    frequency_type?: string;
+    transaction_amount?:
+      | number
+      | string;
+    currency_id?: string;
+  };
+};
+
+type MercadoPagoSubscription = {
+  id?: string;
+  status?: string;
+  next_payment_date?: string;
+  external_reference?: string;
+  preapproval_plan_id?: string;
+};
+
 async function readJson(
   response: Response
-): Promise<Record<string, unknown> | null> {
+): Promise<Record<
+  string,
+  unknown
+> | null> {
   const text =
     await response.text();
 
@@ -56,8 +78,8 @@ export async function POST(
   request: NextRequest
 ) {
   /*
-   * Rota exclusivamente temporária.
-   * Bloqueada em produção.
+   * Rota temporária.
+   * Nunca disponível em produção.
    */
   if (
     process.env.VERCEL_ENV ===
@@ -84,6 +106,7 @@ export async function POST(
     return NextResponse.json(
       {
         ok: false,
+
         error:
           'MERCADO_PAGO_ACCESS_TOKEN não configurado.',
       },
@@ -120,6 +143,7 @@ export async function POST(
       return NextResponse.json(
         {
           ok: false,
+
           error:
             'Token do cartão ou e-mail ausente.',
         },
@@ -131,18 +155,18 @@ export async function POST(
     }
 
     /*
+     * =====================================================
      * PASSO 1
+     * CONFIRMAR O PLANO QUE JÁ CRIAMOS
+     * =====================================================
      *
-     * Criamos um plano temporário
-     * R$ 10/mês SEM free trial.
-     *
-     * Não utilizamos X-scope: stage.
+     * Não criaremos mais nenhum plano.
      */
     const planResponse =
       await fetch(
-        'https://api.mercadopago.com/preapproval_plan',
+        `https://api.mercadopago.com/preapproval_plan/${TEST_PLAN_ID}`,
         {
-          method: 'POST',
+          method: 'GET',
 
           headers: {
             Authorization:
@@ -153,27 +177,6 @@ export async function POST(
           },
 
           cache: 'no-store',
-
-          body: JSON.stringify({
-            reason:
-              'MirraCRM Recurring Test R$10',
-
-            auto_recurring: {
-              frequency: 1,
-
-              frequency_type:
-                'months',
-
-              transaction_amount:
-                10,
-
-              currency_id:
-                'BRL',
-            },
-
-            back_url:
-              'https://develop-mirracrm.vercel.app/cadastro/pagamento/teste-recorrencia',
-          }),
         }
       );
 
@@ -184,7 +187,7 @@ export async function POST(
 
     if (!planResponse.ok) {
       console.error(
-        'Mercado Pago test plan:',
+        'Mercado Pago get test plan:',
         planResponse.status,
         planResult
       );
@@ -199,10 +202,13 @@ export async function POST(
           ok: false,
 
           stage:
-            'create_plan',
+            'get_plan',
+
+          planId:
+            TEST_PLAN_ID,
 
           error:
-            'Mercado Pago recusou a criação do plano temporário.',
+            'Não foi possível consultar o plano temporário.',
 
           providerStatus:
             planResponse.status,
@@ -228,21 +234,19 @@ export async function POST(
         | MercadoPagoPlan
         | null;
 
-    const planId =
-      String(
-        plan?.id || ''
-      ).trim();
-
-    if (!planId) {
+    if (
+      !plan ||
+      plan.id !== TEST_PLAN_ID
+    ) {
       return NextResponse.json(
         {
           ok: false,
 
           stage:
-            'create_plan',
+            'validate_plan',
 
           error:
-            'Mercado Pago criou o plano sem retornar o ID.',
+            'O Mercado Pago retornou um plano diferente do esperado.',
         },
         {
           status: 502,
@@ -251,15 +255,177 @@ export async function POST(
       );
     }
 
+    if (
+      plan.status !== 'active'
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+
+          stage:
+            'validate_plan',
+
+          planId:
+            TEST_PLAN_ID,
+
+          error:
+            `O plano temporário não está ativo. Status: ${plan.status ?? 'desconhecido'}.`,
+        },
+        {
+          status: 409,
+          headers: noStore,
+        }
+      );
+    }
+
+    const planAmount =
+      Number(
+        plan.auto_recurring
+          ?.transaction_amount
+      );
+
+    const planCurrency =
+      plan.auto_recurring
+        ?.currency_id;
+
+    const planFrequency =
+      plan.auto_recurring
+        ?.frequency;
+
+    const planFrequencyType =
+      plan.auto_recurring
+        ?.frequency_type;
+
+    if (
+      planAmount !== 10 ||
+      planCurrency !== 'BRL' ||
+      planFrequency !== 1 ||
+      planFrequencyType !==
+        'months'
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+
+          stage:
+            'validate_plan',
+
+          planId:
+            TEST_PLAN_ID,
+
+          error:
+            'O plano temporário não possui a configuração esperada de R$ 10/mês em BRL.',
+
+          plan: {
+            amount:
+              planAmount,
+
+            currency:
+              planCurrency ??
+              null,
+
+            frequency:
+              planFrequency ??
+              null,
+
+            frequencyType:
+              planFrequencyType ??
+              null,
+
+            status:
+              plan.status ??
+              null,
+          },
+        },
+        {
+          status: 409,
+          headers: noStore,
+        }
+      );
+    }
+
     /*
+     * =====================================================
      * PASSO 2
-     *
-     * Agora criamos a assinatura
-     * usando exatamente o modelo
-     * COM PLANO ASSOCIADO.
+     * CRIAR SOMENTE A ASSINATURA
+     * =====================================================
      */
+
+    const now =
+      Date.now();
+
+    /*
+     * Início 5 minutos à frente.
+     */
+    const startDate =
+      new Date(
+        now +
+          5 * 60 * 1000
+      ).toISOString();
+
+    /*
+     * Vigência de aproximadamente
+     * um ano.
+     */
+    const endDate =
+      new Date(
+        now +
+          365 *
+            24 *
+            60 *
+            60 *
+            1000
+      ).toISOString();
+
     const externalReference =
       `MIRRACRM_RECURRING_TEST_${Date.now()}`;
+
+    /*
+     * Estrutura baseada no exemplo
+     * oficial do Mercado Pago para
+     * assinatura COM plano associado.
+     */
+    const subscriptionPayload = {
+      preapproval_plan_id:
+        TEST_PLAN_ID,
+
+      reason:
+        'MirraCRM Recurring Test R$10',
+
+      external_reference:
+        externalReference,
+
+      payer_email:
+        payerEmail,
+
+      card_token_id:
+        cardTokenId,
+
+      auto_recurring: {
+        frequency: 1,
+
+        frequency_type:
+          'months',
+
+        start_date:
+          startDate,
+
+        end_date:
+          endDate,
+
+        transaction_amount:
+          10,
+
+        currency_id:
+          'BRL',
+      },
+
+      back_url:
+        BACK_URL,
+
+      status:
+        'authorized',
+    };
 
     const subscriptionResponse =
       await fetch(
@@ -277,25 +443,10 @@ export async function POST(
 
           cache: 'no-store',
 
-          body: JSON.stringify({
-            preapproval_plan_id:
-              planId,
-
-            reason:
-              'MirraCRM Recurring Test R$10',
-
-            external_reference:
-              externalReference,
-
-            payer_email:
-              payerEmail,
-
-            card_token_id:
-              cardTokenId,
-
-            status:
-              'authorized',
-          }),
+          body:
+            JSON.stringify(
+              subscriptionPayload
+            ),
         }
       );
 
@@ -325,15 +476,11 @@ export async function POST(
           stage:
             'create_subscription',
 
-          /*
-           * Importante:
-           * se chegarmos aqui, o plano
-           * temporário já foi criado.
-           */
-          planId,
+          planId:
+            TEST_PLAN_ID,
 
           error:
-            'O plano temporário foi criado, mas o Mercado Pago recusou a assinatura.',
+            'Mercado Pago recusou a assinatura vinculada ao plano temporário.',
 
           providerStatus:
             subscriptionResponse.status,
@@ -346,6 +493,46 @@ export async function POST(
           providerCause:
             providerError?.cause ??
             null,
+
+          /*
+           * Apenas dados não sensíveis
+           * para diagnóstico.
+           *
+           * NÃO devolvemos cardTokenId
+           * nem Access Token.
+           */
+          requestConfiguration: {
+            amount:
+              10,
+
+            currency:
+              'BRL',
+
+            frequency:
+              1,
+
+            frequencyType:
+              'months',
+
+            startDate,
+
+            endDate,
+
+            status:
+              'authorized',
+
+            hasPlanId:
+              true,
+
+            hasBackUrl:
+              true,
+
+            hasCardToken:
+              true,
+
+            payerEmail:
+              payerEmail,
+          },
         },
         {
           status: 502,
@@ -353,6 +540,12 @@ export async function POST(
         }
       );
     }
+
+    /*
+     * =====================================================
+     * SUCESSO
+     * =====================================================
+     */
 
     const subscription =
       subscriptionResult as
@@ -370,12 +563,13 @@ export async function POST(
           ok: false,
 
           stage:
-            'create_subscription',
+            'validate_subscription',
 
-          planId,
+          planId:
+            TEST_PLAN_ID,
 
           error:
-            'Mercado Pago criou a assinatura sem retornar o ID.',
+            'Mercado Pago criou a assinatura, mas não retornou o ID.',
         },
         {
           status: 502,
@@ -384,12 +578,6 @@ export async function POST(
       );
     }
 
-    /*
-     * SUCESSO
-     *
-     * Nenhuma credencial ou
-     * card_token_id é devolvido.
-     */
     return NextResponse.json(
       {
         ok: true,
@@ -397,7 +585,8 @@ export async function POST(
         test:
           'associated_plan_no_trial',
 
-        planId,
+        planId:
+          TEST_PLAN_ID,
 
         subscriptionId,
 
@@ -423,6 +612,10 @@ export async function POST(
 
         freeTrial:
           false,
+
+        startDate,
+
+        endDate,
       },
       {
         status: 200,
