@@ -43,11 +43,39 @@ export async function POST(
   request: NextRequest
 ) {
   /*
-   * ROTA EXCLUSIVAMENTE TEMPORÁRIA
-   * PARA TESTE DE BILLING.
+   * ==========================================
+   * ROTA TEMPORÁRIA DE TESTE DE BILLING
+   * ==========================================
    *
-   * Ela só funciona em Preview/develop.
-   * Em produção, responde 404.
+   * Testa:
+   *
+   * active
+   *   ↓
+   * criação da renovação mensal
+   *   ↓
+   * pagamento aprovado simulado
+   *   ↓
+   * aplicação da renovação
+   *   ↓
+   * extensão do período
+   *   ↓
+   * reenvio do mesmo pagamento
+   *   ↓
+   * idempotência
+   *   ↓
+   * rollback
+   *
+   * Esta rota NÃO chama o Mercado Pago.
+   * Esta rota NÃO realiza cobrança real.
+   *
+   * O teste SQL termina propositalmente
+   * com exception para reverter todos os
+   * registros fictícios criados.
+   */
+
+  /*
+   * Segurança adicional:
+   * nunca permitir esta rota em produção.
    */
   if (
     process.env.VERCEL_ENV === 'production'
@@ -65,17 +93,19 @@ export async function POST(
   }
 
   /*
-   * Usaremos o mesmo segredo temporário
-   * que já existe no Preview para o setup
-   * do Mercado Pago.
+   * Reutilizamos temporariamente o segredo
+   * de setup que já existe no Preview.
    *
-   * Não coloque esse segredo no código.
+   * O segredo nunca deve ser colocado
+   * diretamente no código.
    */
   const expectedSecret =
     process.env.MERCADO_PAGO_SETUP_SECRET;
 
   const receivedSecret =
-    request.headers.get('x-setup-secret');
+    request.headers.get(
+      'x-setup-secret'
+    );
 
   if (
     !expectedSecret ||
@@ -95,47 +125,66 @@ export async function POST(
   }
 
   try {
+    /*
+     * Cliente administrativo.
+     *
+     * SUPABASE_SERVICE_ROLE_KEY faz com que
+     * auth.role() dentro dos RPCs protegidos
+     * seja service_role.
+     */
     const admin =
       getAdminSupabase();
 
     /*
-     * A chamada Supabase abaixo usa
-     * SUPABASE_SERVICE_ROLE_KEY.
-     *
-     * Portanto auth.role() dentro do
-     * PostgreSQL será service_role.
+     * Executa o teste transacional criado
+     * no PostgreSQL.
      */
     const {
       data,
       error,
     } = await admin.rpc(
-      'test_first_mercado_pago_charge'
+      'test_monthly_renewal_pipeline'
     );
 
     /*
-     * TEST_OK... chega como "erro"
-     * propositalmente.
+     * IMPORTANTE:
      *
-     * A exception dentro da função força
-     * rollback de TODOS os dados fictícios
-     * criados pelo teste.
+     * O resultado de sucesso chega como
+     * "erro" propositalmente.
+     *
+     * A função PostgreSQL lança:
+     *
+     * TEST_OK_MONTHLY_RENEWAL_AND_
+     * IDEMPOTENCY_ROLLBACK
+     *
+     * justamente para forçar rollback de
+     * todos os dados fictícios do teste.
      */
     if (error) {
       const message =
-        String(error.message || '');
+        String(
+          error.message || ''
+        );
 
       if (
         message.includes(
-          'TEST_OK_FIRST_MP_CHARGE_ROLLBACK'
+          'TEST_OK_MONTHLY_RENEWAL_AND_IDEMPOTENCY_ROLLBACK'
         )
       ) {
         return NextResponse.json(
           {
             ok: true,
+
             test:
-              'first_mercado_pago_charge',
+              'monthly_renewal_pipeline',
+
             result:
-              'TEST_OK_FIRST_MP_CHARGE_ROLLBACK',
+              'TEST_OK_MONTHLY_RENEWAL_AND_IDEMPOTENCY_ROLLBACK',
+
+            renewal: true,
+
+            idempotency: true,
+
             rollback: true,
           },
           {
@@ -145,21 +194,30 @@ export async function POST(
         );
       }
 
+      /*
+       * Qualquer outro erro significa
+       * falha verdadeira no teste.
+       */
       console.error(
-        'Teste financeiro falhou:',
+        'Teste de renovação mensal falhou:',
         error
       );
 
       return NextResponse.json(
         {
           ok: false,
+
           test:
-            'first_mercado_pago_charge',
+            'monthly_renewal_pipeline',
+
           error: message,
+
           code:
             error.code || null,
+
           details:
             error.details || null,
+
           hint:
             error.hint || null,
         },
@@ -171,17 +229,22 @@ export async function POST(
     }
 
     /*
-     * Não esperamos chegar aqui porque
-     * o teste termina propositalmente
-     * com exception para garantir rollback.
+     * Não deveríamos chegar aqui.
+     *
+     * Se a função retornar normalmente,
+     * significa que o rollback proposital
+     * não aconteceu.
      */
     return NextResponse.json(
       {
         ok: false,
+
         test:
-          'first_mercado_pago_charge',
+          'monthly_renewal_pipeline',
+
         error:
           'O teste terminou sem executar o rollback proposital.',
+
         unexpectedData:
           data ?? null,
       },
@@ -192,13 +255,17 @@ export async function POST(
     );
   } catch (error) {
     console.error(
-      'Erro inesperado no teste financeiro:',
+      'Erro inesperado no teste de renovação:',
       error
     );
 
     return NextResponse.json(
       {
         ok: false,
+
+        test:
+          'monthly_renewal_pipeline',
+
         error:
           error instanceof Error
             ? error.message
@@ -212,12 +279,23 @@ export async function POST(
   }
 }
 
+/*
+ * GET serve apenas para verificar que
+ * a rota temporária está publicada.
+ *
+ * Não executa nenhum teste financeiro.
+ */
 export async function GET() {
   return NextResponse.json(
     {
       ok: true,
+
       route:
-        'MirraCRM temporary billing test',
+        'MirraCRM temporary monthly renewal test',
+
+      test:
+        'monthly_renewal_pipeline',
+
       production:
         process.env.VERCEL_ENV ===
         'production',
