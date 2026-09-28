@@ -8,34 +8,21 @@ import {
   useState,
 } from 'react';
 
-type CardFormData = {
+type TestCardFormData = {
   token?: string;
   cardholderEmail?: string;
 };
 
-type CardFormInstance = {
-  getCardFormData: () => CardFormData;
+type TestCardFormInstance = {
+  getCardFormData: () => TestCardFormData;
   unmount?: () => void;
 };
 
-type MercadoPagoInstance = {
-  cardForm: (config: any) => CardFormInstance;
-};
-
-declare global {
-  interface Window {
-    MercadoPago?: new (
-      publicKey: string,
-      options?: {
-        locale?: string;
-      }
-    ) => MercadoPagoInstance;
-  }
-}
-
 export default function RecurringTestPage() {
   const cardFormRef =
-    useRef<CardFormInstance | null>(null);
+    useRef<TestCardFormInstance | null>(
+      null
+    );
 
   const initializedRef =
     useRef(false);
@@ -56,7 +43,10 @@ export default function RecurringTestPage() {
     useState('');
 
   const [result, setResult] =
-    useState<any>(null);
+    useState<Record<
+      string,
+      unknown
+    > | null>(null);
 
   const publicKey =
     process.env
@@ -71,208 +61,283 @@ export default function RecurringTestPage() {
       return;
     }
 
-    if (
-      !publicKey ||
-      !window.MercadoPago
-    ) {
+    if (!publicKey) {
       setError(
         'Mercado Pago não configurado.'
       );
       return;
     }
 
+    /*
+     * A página oficial do MirraCRM já declara
+     * window.MercadoPago globalmente.
+     *
+     * Aqui evitamos uma segunda declaração
+     * global para não gerar conflito no
+     * TypeScript durante o build.
+     */
+    const MercadoPagoConstructor =
+      window.MercadoPago;
+
+    if (!MercadoPagoConstructor) {
+      setError(
+        'SDK do Mercado Pago não foi carregado.'
+      );
+      return;
+    }
+
     initializedRef.current = true;
 
-    const mp =
-      new window.MercadoPago(
-        publicKey,
-        {
-          locale: 'pt-BR',
-        }
+    try {
+      const mp =
+        new MercadoPagoConstructor(
+          publicKey,
+          {
+            locale: 'pt-BR',
+          }
+        );
+
+      cardFormRef.current =
+        mp.cardForm({
+          amount: '10',
+
+          iframe: true,
+
+          form: {
+            id: 'form-checkout',
+
+            cardNumber: {
+              id:
+                'form-checkout__cardNumber',
+
+              placeholder:
+                'Número do cartão',
+            },
+
+            expirationDate: {
+              id:
+                'form-checkout__expirationDate',
+
+              placeholder:
+                'MM/AA',
+            },
+
+            securityCode: {
+              id:
+                'form-checkout__securityCode',
+
+              placeholder:
+                'CVV',
+            },
+
+            cardholderName: {
+              id:
+                'form-checkout__cardholderName',
+
+              placeholder:
+                'Nome do titular',
+            },
+
+            issuer: {
+              id:
+                'form-checkout__issuer',
+
+              placeholder:
+                'Banco emissor',
+            },
+
+            installments: {
+              id:
+                'form-checkout__installments',
+
+              placeholder:
+                'Parcelas',
+            },
+
+            identificationType: {
+              id:
+                'form-checkout__identificationType',
+
+              placeholder:
+                'Documento',
+            },
+
+            identificationNumber: {
+              id:
+                'form-checkout__identificationNumber',
+
+              placeholder:
+                'CPF',
+            },
+
+            cardholderEmail: {
+              id:
+                'form-checkout__cardholderEmail',
+
+              placeholder:
+                'E-mail Buyer Test User',
+            },
+          },
+
+          callbacks: {
+            onFormMounted: (
+              mountError?: unknown
+            ) => {
+              if (mountError) {
+                console.error(
+                  'Erro ao carregar CardForm:',
+                  mountError
+                );
+
+                setError(
+                  'Erro ao carregar formulário.'
+                );
+
+                return;
+              }
+
+              setReady(true);
+            },
+
+            onFetching: () => {
+              return () => {};
+            },
+
+            onSubmit: async (
+              event: FormEvent<HTMLFormElement>
+            ) => {
+              event.preventDefault();
+
+              if (
+                submittingRef.current
+              ) {
+                return;
+              }
+
+              submittingRef.current =
+                true;
+
+              setSubmitting(true);
+              setError('');
+              setResult(null);
+
+              try {
+                const data =
+                  cardFormRef.current
+                    ?.getCardFormData();
+
+                const cardTokenId =
+                  data?.token;
+
+                const payerEmail =
+                  data?.cardholderEmail;
+
+                if (
+                  !cardTokenId ||
+                  !payerEmail
+                ) {
+                  throw new Error(
+                    'Token ou e-mail não foi gerado. Confira os campos.'
+                  );
+                }
+
+                const response =
+                  await fetch(
+                    '/api/billing/mercado-pago/test-recurring',
+                    {
+                      method: 'POST',
+
+                      headers: {
+                        'Content-Type':
+                          'application/json',
+                      },
+
+                      body:
+                        JSON.stringify({
+                          cardTokenId,
+                          payerEmail,
+                        }),
+                    }
+                  );
+
+                let responseData:
+                  | Record<
+                      string,
+                      unknown
+                    >
+                  | null = null;
+
+                try {
+                  responseData =
+                    (await response.json()) as Record<
+                      string,
+                      unknown
+                    >;
+                } catch {
+                  responseData =
+                    null;
+                }
+
+                if (
+                  !response.ok ||
+                  responseData?.ok !==
+                    true
+                ) {
+                  const message =
+                    typeof responseData?.error ===
+                    'string'
+                      ? responseData.error
+                      : 'Falha ao criar assinatura de teste.';
+
+                  throw new Error(
+                    message
+                  );
+                }
+
+                setResult(
+                  responseData
+                );
+              } catch (err) {
+                console.error(
+                  'Teste recorrência:',
+                  err
+                );
+
+                setError(
+                  err instanceof Error
+                    ? err.message
+                    : 'Erro inesperado.'
+                );
+              } finally {
+                submittingRef.current =
+                  false;
+
+                setSubmitting(false);
+              }
+            },
+          },
+        }) as TestCardFormInstance;
+    } catch (initializationError) {
+      console.error(
+        'Erro ao inicializar Mercado Pago:',
+        initializationError
       );
 
-    cardFormRef.current =
-      mp.cardForm({
-        amount: '10',
-        iframe: true,
+      initializedRef.current =
+        false;
 
-        form: {
-          id: 'form-checkout',
-
-          cardNumber: {
-            id:
-              'form-checkout__cardNumber',
-            placeholder:
-              'Número do cartão',
-          },
-
-          expirationDate: {
-            id:
-              'form-checkout__expirationDate',
-            placeholder:
-              'MM/AA',
-          },
-
-          securityCode: {
-            id:
-              'form-checkout__securityCode',
-            placeholder:
-              'CVV',
-          },
-
-          cardholderName: {
-            id:
-              'form-checkout__cardholderName',
-            placeholder:
-              'Nome do titular',
-          },
-
-          issuer: {
-            id:
-              'form-checkout__issuer',
-            placeholder:
-              'Banco emissor',
-          },
-
-          installments: {
-            id:
-              'form-checkout__installments',
-            placeholder:
-              'Parcelas',
-          },
-
-          identificationType: {
-            id:
-              'form-checkout__identificationType',
-            placeholder:
-              'Documento',
-          },
-
-          identificationNumber: {
-            id:
-              'form-checkout__identificationNumber',
-            placeholder:
-              'CPF',
-          },
-
-          cardholderEmail: {
-            id:
-              'form-checkout__cardholderEmail',
-            placeholder:
-              'E-mail Buyer Test User',
-          },
-        },
-
-        callbacks: {
-          onFormMounted: (
-            mountError?: unknown
-          ) => {
-            if (mountError) {
-              setError(
-                'Erro ao carregar formulário.'
-              );
-              return;
-            }
-
-            setReady(true);
-          },
-
-          onFetching: () => {
-            return () => {};
-          },
-
-          onSubmit: async (
-            event: FormEvent<HTMLFormElement>
-          ) => {
-            event.preventDefault();
-
-            if (
-              submittingRef.current
-            ) {
-              return;
-            }
-
-            submittingRef.current = true;
-            setSubmitting(true);
-            setError('');
-            setResult(null);
-
-            try {
-              const data =
-                cardFormRef.current
-                  ?.getCardFormData();
-
-              const cardTokenId =
-                data?.token;
-
-              const payerEmail =
-                data?.cardholderEmail;
-
-              if (
-                !cardTokenId ||
-                !payerEmail
-              ) {
-                throw new Error(
-                  'Token ou e-mail não foi gerado.'
-                );
-              }
-
-              const response =
-                await fetch(
-                  '/api/billing/mercado-pago/test-recurring',
-                  {
-                    method: 'POST',
-
-                    headers: {
-                      'Content-Type':
-                        'application/json',
-                    },
-
-                    body:
-                      JSON.stringify({
-                        cardTokenId,
-                        payerEmail,
-                      }),
-                  }
-                );
-
-              const responseData =
-                await response.json();
-
-              if (
-                !response.ok ||
-                !responseData?.ok
-              ) {
-                throw new Error(
-                  responseData?.error ||
-                    'Falha ao criar assinatura.'
-                );
-              }
-
-              setResult(
-                responseData
-              );
-            } catch (err) {
-              setError(
-                err instanceof Error
-                  ? err.message
-                  : 'Erro inesperado.'
-              );
-            } finally {
-              submittingRef.current =
-                false;
-
-              setSubmitting(false);
-            }
-          },
-        },
-      });
+      setError(
+        'Não foi possível inicializar o Mercado Pago.'
+      );
+    }
 
     return () => {
       try {
         cardFormRef.current
           ?.unmount?.();
-      } catch {}
+      } catch {
+        // Página temporária de teste.
+      }
 
       cardFormRef.current =
         null;
@@ -307,8 +372,8 @@ export default function RecurringTestPage() {
 
         <p>
           Ambiente temporário de teste.
-          Valor: R$ 10,00/mês.
-          Sem período grátis.
+          Valor: R$ 10,00/mês. Sem
+          período grátis.
         </p>
 
         <p>
@@ -408,6 +473,7 @@ export default function RecurringTestPage() {
             style={{
               width: '100%',
               padding: 14,
+
               cursor:
                 submitting
                   ? 'wait'
@@ -416,7 +482,9 @@ export default function RecurringTestPage() {
           >
             {submitting
               ? 'Criando teste...'
-              : 'Criar assinatura de teste'}
+              : ready
+                ? 'Criar assinatura de teste'
+                : 'Carregando Mercado Pago...'}
           </button>
         </form>
 
@@ -433,19 +501,31 @@ export default function RecurringTestPage() {
         )}
 
         {result && (
-          <pre
-            style={{
-              marginTop: 20,
-              whiteSpace:
-                'pre-wrap',
-            }}
-          >
-            {JSON.stringify(
-              result,
-              null,
-              2
-            )}
-          </pre>
+          <>
+            <h2
+              style={{
+                marginTop: 24,
+              }}
+            >
+              Assinatura criada
+            </h2>
+
+            <pre
+              style={{
+                whiteSpace:
+                  'pre-wrap',
+
+                overflowWrap:
+                  'anywhere',
+              }}
+            >
+              {JSON.stringify(
+                result,
+                null,
+                2
+              )}
+            </pre>
+          </>
         )}
       </main>
     </>
