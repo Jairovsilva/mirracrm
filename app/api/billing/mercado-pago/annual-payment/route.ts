@@ -43,6 +43,20 @@ export async function POST(request: NextRequest) {
     const mercadoPagoAccessToken =
       process.env.MERCADO_PAGO_ACCESS_TOKEN?.trim();
 
+    /**
+     * DIAGNÓSTICO TEMPORÁRIO DO MERCADO PAGO
+     *
+     * Não imprime o Access Token completo.
+     * Remover depois de identificarmos a origem do erro 401.
+     */
+    console.log('MP credential diagnostic:', {
+      configured: Boolean(mercadoPagoAccessToken),
+      prefix: mercadoPagoAccessToken?.slice(0, 8),
+      length: mercadoPagoAccessToken?.length,
+      vercelEnv: process.env.VERCEL_ENV,
+      vercelGitBranch: process.env.VERCEL_GIT_COMMIT_REF,
+    });
+
     if (
       !supabaseUrl ||
       !anonKey ||
@@ -187,6 +201,26 @@ export async function POST(request: NextRequest) {
         ? input.identificationNumber.trim()
         : '';
 
+    /**
+     * O frontend já envia payerEmail.
+     *
+     * Em Preview, usamos o e-mail informado no formulário para permitir
+     * o Buyer Test User do Mercado Pago.
+     *
+     * Em Production, continuamos usando o e-mail autenticado no MirraCRM.
+     */
+    const payerEmail =
+      typeof input.payerEmail === 'string'
+        ? input.payerEmail.trim().toLowerCase()
+        : '';
+
+    const isPreview = process.env.VERCEL_ENV === 'preview';
+
+    const mercadoPagoPayerEmail =
+      isPreview && payerEmail
+        ? payerEmail
+        : user.email.trim().toLowerCase();
+
     const installments = Number(input.installments);
 
     if (!cardTokenId || !paymentMethodId) {
@@ -195,6 +229,10 @@ export async function POST(request: NextRequest) {
 
     if (!Number.isInteger(installments) || installments <= 0) {
       return errorResponse('Número de parcelas inválido.', 400);
+    }
+
+    if (!mercadoPagoPayerEmail) {
+      return errorResponse('E-mail do pagador não encontrado.', 400);
     }
 
     const { data: plan, error: planError } = await admin
@@ -278,7 +316,7 @@ export async function POST(request: NextRequest) {
       .digest('hex');
 
     const payer: Record<string, unknown> = {
-      email: user.email,
+      email: mercadoPagoPayerEmail,
     };
 
     if (identificationType && identificationNumber) {
@@ -287,6 +325,23 @@ export async function POST(request: NextRequest) {
         number: identificationNumber,
       };
     }
+
+    /**
+     * Diagnóstico seguro do payer.
+     *
+     * Não imprime CPF, token do cartão ou Access Token.
+     */
+    console.log('MP payer diagnostic:', {
+      environment: process.env.VERCEL_ENV,
+      usingFormEmail: isPreview && Boolean(payerEmail),
+      payerEmailDomain:
+        mercadoPagoPayerEmail.split('@')[1] || 'invalid',
+      paymentMethodId,
+      installments,
+      hasIdentification:
+        Boolean(identificationType) &&
+        Boolean(identificationNumber),
+    });
 
     const paymentBody: Record<string, unknown> = {
       transaction_amount: centsToAmount(amountCents),
@@ -326,11 +381,14 @@ export async function POST(request: NextRequest) {
     }
 
     if (!mercadoPagoResponse.ok || !mercadoPagoPayment?.id) {
-      console.error('Mercado Pago recusou a criação do pagamento anual:', {
-        httpStatus: mercadoPagoResponse.status,
-        response: mercadoPagoPayment,
-        orderId: order.id,
-      });
+      console.error(
+        'Mercado Pago recusou a criação do pagamento anual:',
+        {
+          httpStatus: mercadoPagoResponse.status,
+          response: mercadoPagoPayment,
+          orderId: order.id,
+        }
+      );
 
       return errorResponse(
         'O Mercado Pago não conseguiu processar o pagamento anual. Confira os dados e tente novamente.',
