@@ -310,14 +310,6 @@ export async function POST(
 
   /*
    * 4. Corpo da requisição.
-   *
-   * Para /preapproval precisamos
-   * do token do cartão e do e-mail
-   * do pagador.
-   *
-   * paymentMethodId, issuerId,
-   * installments e CPF não são
-   * necessários nesta chamada.
    */
   let body:
     Record<
@@ -436,13 +428,11 @@ export async function POST(
   }
 
   /*
-   * Em Preview utilizamos
-   * o Buyer Test User
-   * informado no formulário.
+   * Preview:
+   * usa Buyer Test User.
    *
-   * Em Production utilizamos
-   * o e-mail real da conta
-   * MirraCRM.
+   * Production:
+   * usa e-mail real do cliente.
    */
   const isPreview =
     process.env
@@ -618,8 +608,7 @@ export async function POST(
   }
 
   /*
-   * Impede criação duplicada
-   * de assinatura externa.
+   * Evita assinatura externa duplicada.
    */
   if (
     internalSubscription
@@ -640,9 +629,8 @@ export async function POST(
   }
 
   /*
-   * 8. Validamos o plano
-   * e o preço anual
-   * diretamente no banco.
+   * 8. Validamos plano
+   * e preço anual.
    */
   const {
     data: billingPlan,
@@ -709,10 +697,58 @@ export async function POST(
     );
   }
 
+  /*
+   * Preço REAL do plano.
+   *
+   * Exemplo Basic:
+   * 538920 cents = R$ 5.389,20.
+   */
   const annualAmount =
     centsToAmount(
       annualAmountCents
     );
+
+  /*
+   * IMPORTANTE:
+   *
+   * O ambiente de teste do Mercado Pago
+   * recusou valores acima de R$ 4.000,00.
+   *
+   * Por isso:
+   *
+   * Preview:
+   * enviamos R$ 10,00 ao Mercado Pago
+   * exclusivamente para testar o fluxo.
+   *
+   * Production:
+   * enviamos o valor anual REAL salvo
+   * no banco.
+   *
+   * O valor real do billing_plan e da
+   * billing_order NÃO é modificado.
+   */
+  const mercadoPagoAnnualAmount =
+    isPreview
+      ? 10
+      : annualAmount;
+
+  console.log(
+    'MP annual amount diagnostic:',
+    {
+      environment:
+        process.env
+          .VERCEL_ENV,
+
+      realAnnualAmount:
+        annualAmount,
+
+      providerAmount:
+        mercadoPagoAnnualAmount,
+
+      usingTestAmount:
+        isPreview,
+    }
+  );
 
   /*
    * 9. Criamos/reutilizamos
@@ -881,15 +917,13 @@ export async function POST(
   }
 
   /*
-   * 11. Criamos a assinatura anual
-   * diretamente em /preapproval.
+   * 11. Criamos assinatura anual
+   * usando /preapproval.
    *
-   * Não há preapproval_plan_id:
-   * esta é uma assinatura sem
-   * plano associado.
+   * Sem preapproval_plan_id.
    *
-   * Cobrança:
-   * uma vez a cada 12 meses.
+   * Frequência:
+   * uma cobrança a cada 12 meses.
    */
   const mercadoPagoBody = {
     reason:
@@ -912,7 +946,7 @@ export async function POST(
         'months',
 
       transaction_amount:
-        annualAmount,
+        mercadoPagoAnnualAmount,
 
       currency_id:
         'BRL',
@@ -936,7 +970,13 @@ export async function POST(
         'annual',
 
       transactionAmount:
+        mercadoPagoAnnualAmount,
+
+      realAnnualAmount:
         annualAmount,
+
+      usingTestAmount:
+        isPreview,
 
       currency:
         'BRL',
@@ -974,9 +1014,8 @@ export async function POST(
             'application/json',
 
           /*
-           * Mantemos o mesmo padrão
-           * já utilizado pela rota
-           * mensal do MirraCRM.
+           * Mesma estratégia
+           * da rota mensal.
            */
           'X-Idempotency-Key':
             orderId,
@@ -1007,7 +1046,7 @@ export async function POST(
   }
 
   /*
-   * 12. Falha do Mercado Pago.
+   * 12. Erro do Mercado Pago.
    */
   if (
     !mercadoPagoResponse.ok ||
@@ -1058,8 +1097,8 @@ export async function POST(
     mercadoPago.id;
 
   /*
-   * 13. Validações defensivas
-   * da assinatura retornada.
+   * 13. Validação defensiva
+   * da resposta.
    */
   if (
     mercadoPago
@@ -1097,15 +1136,10 @@ export async function POST(
   }
 
   /*
-   * 14. Vinculamos a assinatura
+   * 14. Vinculamos assinatura
    * externa à billing_subscription.
    *
-   * IMPORTANTE:
-   *
-   * Não ativamos a assinatura aqui.
-   * A confirmação financeira deve
-   * continuar dependendo do webhook
-   * / consulta canônica do Mercado Pago.
+   * NÃO ativamos assinatura aqui.
    */
   const {
     data:
@@ -1152,11 +1186,6 @@ export async function POST(
     updateSubscriptionError ||
     !updatedSubscription
   ) {
-    /*
-     * A assinatura externa JÁ existe.
-     *
-     * NÃO criar outra automaticamente.
-     */
     console.error(
       'ASSINATURA_ANUAL_MP_CRIADA_MAS_NAO_VINCULADA:',
       {
@@ -1186,14 +1215,8 @@ export async function POST(
   }
 
   /*
-   * 15. Relacionamos também
-   * billing_order à assinatura
-   * externa.
-   *
-   * Para preapproval usamos
-   * provider_checkout_id,
-   * exatamente como a rota
-   * mensal já faz.
+   * 15. Relacionamos a ordem
+   * à assinatura externa.
    */
   const {
     error:
@@ -1226,11 +1249,6 @@ export async function POST(
   if (
     updateOrderError
   ) {
-    /*
-     * Não desfazemos a assinatura:
-     * o vínculo principal já está
-     * salvo em billing_subscriptions.
-     */
     console.error(
       'Assinatura anual vinculada, mas billing_order não foi atualizada:',
       {
@@ -1245,10 +1263,9 @@ export async function POST(
   }
 
   /*
-   * 16. Sucesso na criação
-   * da assinatura.
+   * 16. Sucesso na criação.
    *
-   * Isso NÃO significa ainda
+   * Isso ainda não significa
    * pagamento confirmado.
    */
   return json(
@@ -1293,6 +1310,15 @@ export async function POST(
         id:
           orderId,
       },
+
+      testMode:
+        isPreview,
+
+      chargedAmount:
+        mercadoPagoAnnualAmount,
+
+      realAnnualAmount:
+        annualAmount,
     },
     201
   );
